@@ -6,10 +6,12 @@ import { Timestamp, FieldValue } from 'firebase/firestore'; // Import necessary 
 export interface UserProfile {
   uid: string;
   email: string;
-  role: 'Admin' | 'Technician' | string; // Define known roles, allow string for flexibility
-  secteurs: string[]; // Array of sectors the user belongs to
-  displayName?: string; // Optional display name
-}
+   role: 'Admin' | 'Technician' | string; // Define known roles, allow string for flexibility
+   secteurs: string[]; // Array of sectors the user belongs to
+   displayName?: string; // Optional display name
+   createdAt?: Timestamp | Date; // Optional: Timestamp of creation
+   updatedAt?: Timestamp | Date; // Optional: Timestamp of last update
+ }
 
 /**
  * Represents a SAP ticket document from Firestore sector collections (CHR, HACCP, etc.).

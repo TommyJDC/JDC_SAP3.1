@@ -137,3 +137,39 @@ export const formatDate = (date: Date): string => {
   const year = date.getFullYear();
   return `${year}-${month}-${day}`;
 };
+
+/**
+ * Calculates the start (Monday 00:00 UTC) and end (Sunday 23:59:59.999 UTC) dates
+ * for the week to display in the agenda.
+ * If today is Saturday or Sunday, it calculates for the *next* week.
+ * Otherwise, it calculates for the *current* week.
+ * Returns dates in UTC.
+ *
+ * @param today Optional: The current date (defaults to new Date()). Useful for testing.
+ * @returns An object { startOfWeek: Date, endOfWeek: Date }
+ */
+export const getWeekDateRangeForAgenda = (today = new Date()): { startOfWeek: Date, endOfWeek: Date } => {
+    const currentDay = today.getUTCDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+
+    let daysToAdd = 0;
+    // If today is Saturday (6) or Sunday (0), target next Monday
+    if (currentDay === 6) {
+        daysToAdd = 2; // Saturday to Monday
+    } else if (currentDay === 0) {
+        daysToAdd = 1; // Sunday to Monday
+    } else {
+        // Otherwise, target the current week's Monday
+        daysToAdd = 1 - currentDay; // Monday(1) - currentDay
+    }
+
+    // Calculate the start of the target week (Monday) using UTC methods
+    const startOfWeek = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + daysToAdd));
+    startOfWeek.setUTCHours(0, 0, 0, 0); // Set to beginning of the day in UTC
+
+    // Calculate the end of the target week (Sunday) using UTC methods
+    const endOfWeek = new Date(startOfWeek);
+    endOfWeek.setUTCDate(startOfWeek.getUTCDate() + 6); // Add 6 days to get to Sunday
+    endOfWeek.setUTCHours(23, 59, 59, 999); // Set to end of the day in UTC
+
+    return { startOfWeek, endOfWeek };
+};

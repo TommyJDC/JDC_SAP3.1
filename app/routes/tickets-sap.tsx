@@ -1,82 +1,86 @@
 import type { MetaFunction } from "@remix-run/node";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useOutletContext } from "@remix-run/react";
-import { getUserProfileSdk, listenToAllTicketsForSectorsSdk } from "~/services/firestore.service";
-import type { SapTicket, UserProfile, AppUser } from "~/types/firestore.types";
-import { Timestamp } from 'firebase/firestore'; // Import Timestamp for date handling
+// Import getAllTicketsForSectorsSdk instead of the listener
+import { getUserProfileSdk, getAllTicketsForSectorsSdk } from "~/services/firestore.service";
+// Import UserSession from session.server instead of AppUser
+import type { SapTicket, UserProfile } from "~/types/firestore.types";
+import type { UserSession } from "~/services/session.server"; // Import UserSession
+import { Timestamp } from 'firebase/firestore'; // Keep for type checking if needed
 import { Input } from "~/components/ui/Input";
 import { Button } from "~/components/ui/Button";
-import TicketSAPDetails from "~/components/TicketSAPDetails"; // Import the modal component
+import TicketSAPDetails from "~/components/TicketSAPDetails";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faTicket, faFilter, faSearch, faUserTag, faChevronDown, faChevronRight, faSpinner,
   faExclamationTriangle, faCircleNodes, faPhone, faMapMarkerAlt, faUserTie, faInfoCircle,
-  faCalendarAlt, faChevronUp // Added new icons
+  faCalendarAlt, faChevronUp
 } from "@fortawesome/free-solid-svg-icons";
 import { getTicketStatusStyle } from "~/utils/styleUtils";
-// Use the new functions from dateUtils
 import { parseFrenchDate, formatDateForDisplay } from "~/utils/dateUtils";
 
 export const meta: MetaFunction = () => {
   return [{ title: "Tickets SAP | JDC Dashboard" }];
 };
 
+// Update Outlet context type to use UserSession
 type OutletContextType = {
-  user: AppUser | null;
+  user: UserSession | null;
+  profile: UserProfile | null; // Profile now comes from root loader context
 };
 
-// Updated to group by raisonSociale, assumes tickets without raisonSociale are pre-filtered
 const groupTicketsByRaisonSociale = (tickets: SapTicket[]): Map<string, SapTicket[]> => {
   const grouped = new Map<string, SapTicket[]>();
    if (!Array.isArray(tickets)) {
      return grouped;
    }
   tickets.forEach(ticket => {
-    // We assume tickets without raisonSociale are already filtered out before calling this
-    const raisonSociale = ticket.raisonSociale!; // Use non-null assertion as it should be present
-    const existing = grouped.get(raisonSociale);
-    if (existing) {
-      existing.push(ticket);
-    } else {
-      grouped.set(raisonSociale, [ticket]);
+    const raisonSociale = ticket.raisonSociale; // Use raisonSociale directly
+    if (raisonSociale) { // Only group if raisonSociale exists
+        const existing = grouped.get(raisonSociale);
+        if (existing) {
+          existing.push(ticket);
+        } else {
+          grouped.set(raisonSociale, [ticket]);
+        }
     }
   });
   return grouped;
 };
 
 export default function TicketsSap() {
-  const { user } = useOutletContext<OutletContextType>();
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  // Get user and profile directly from context
+  const { user, profile: initialProfile } = useOutletContext<OutletContextType>();
+  // No need for separate userProfile state if it comes from context
+  // const [userProfile, setUserProfile] = useState<UserProfile | null>(initialProfile);
+  const userProfile = initialProfile; // Use profile from context directly
+
   const [allTickets, setAllTickets] = useState<SapTicket[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isListening, setIsListening] = useState(false);
+  // Remove isListening state as we are not using a listener anymore
+  // const [isListening, setIsListening] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedSector, setSelectedSector] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [showNumberOptions, setShowNumberOptions] = useState<Record<string, boolean>>({}); // State for phone dropdown visibility
+  const [showNumberOptions, setShowNumberOptions] = useState<Record<string, boolean>>({});
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<SapTicket | null>(null);
 
-  const unsubscribeRef = useRef<() => void>(() => {});
+  // Remove unsubscribeRef as there's no listener
+  // const unsubscribeRef = useRef<() => void>(() => {});
 
+  // useEffect to fetch tickets once when user/profile changes
   useEffect(() => {
     let isMounted = true;
 
-    const setupListener = async () => {
-      if (!user) {
-        console.log("Tickets SAP: No user, clearing state and listener.");
-        if (unsubscribeRef.current) unsubscribeRef.current();
-        setIsListening(false);
+    const fetchTickets = async () => {
+      // Use user from context directly
+      if (!user || !userProfile) {
+        console.log("Tickets SAP: No user or profile, clearing state.");
         setIsLoading(false);
         setAllTickets([]);
-        setUserProfile(null);
         setError(null);
         return;
-      }
-
-      if (isListening) {
-          console.log("Tickets SAP: Already listening, skipping setup.");
-          return;
       }
 
       setIsLoading(true);
@@ -84,94 +88,71 @@ export default function TicketsSap() {
       setAllTickets([]);
 
       try {
-        const profile = await getUserProfileSdk(user.uid);
-        if (!isMounted) return;
-        setUserProfile(profile);
-        console.log("Tickets SAP: User profile fetched:", profile);
+        // Profile is already available from context, no need to fetch again unless needed for refresh
+        // const profile = await getUserProfileSdk(user.userId); // Use userId from UserSession
+        // if (!isMounted) return;
+        // setUserProfile(profile); // Update state if fetched again
+        // console.log("Tickets SAP: User profile fetched:", profile);
 
-        if (!profile) {
-           throw new Error("Profil utilisateur introuvable.");
-        }
-
-        const sectorsToQuery = profile.secteurs ?? [];
+        const sectorsToQuery = userProfile.secteurs ?? [];
         if (sectorsToQuery.length === 0) {
-            console.warn(`Tickets SAP: User ${user.uid} (Role: ${profile.role}) has no sectors assigned.`);
+            console.warn(`Tickets SAP: User ${user.userId} (Role: ${userProfile.role}) has no sectors assigned.`);
             setAllTickets([]);
             setIsLoading(false);
             return;
         }
 
-        console.log(`Tickets SAP: Setting up listener for sectors: ${sectorsToQuery.join(', ')}`);
+        console.log(`Tickets SAP: Fetching tickets for sectors: ${sectorsToQuery.join(', ')}`);
 
-        const { unsubscribe } = listenToAllTicketsForSectorsSdk(
-          sectorsToQuery,
-          (updatedTickets) => {
-            if (isMounted) {
-              console.log(`Tickets SAP: Listener received ${updatedTickets.length} tickets.`);
-              // Filter out tickets without raisonSociale immediately upon receiving updates
-              const ticketsWithRaisonSociale = updatedTickets.filter(t => t.raisonSociale);
-              setAllTickets(ticketsWithRaisonSociale);
-              if (isLoading) setIsLoading(false);
-              setError(null);
-            }
-          },
-          (listenerError) => {
-            if (isMounted) {
-              console.error("Tickets SAP: Listener error:", listenerError);
-              setError(`Erreur de connexion temps réel: ${listenerError.message}`);
-              setIsLoading(false);
-              setIsListening(false);
-            }
-          }
-        );
+        // Fetch tickets once using getAllTicketsForSectorsSdk
+        const fetchedTickets = await getAllTicketsForSectorsSdk(sectorsToQuery);
 
-        unsubscribeRef.current = unsubscribe;
-        setIsListening(true);
+        if (isMounted) {
+          console.log(`Tickets SAP: Fetched ${fetchedTickets.length} tickets.`);
+          // Filter out tickets without raisonSociale immediately upon receiving updates
+          const ticketsWithRaisonSociale = fetchedTickets.filter(t => t.raisonSociale);
+          setAllTickets(ticketsWithRaisonSociale);
+          setIsLoading(false); // Set loading false after fetch completes
+          setError(null);
+        }
 
       } catch (err: any) {
         if (isMounted) {
-          console.error("Error setting up listener for Tickets SAP:", err);
+          console.error("Error fetching Tickets SAP:", err);
           setError(`Erreur de chargement initial: ${err.message}`);
           setAllTickets([]); // Clear tickets on error
           setIsLoading(false);
-          setIsListening(false);
         }
       }
     };
 
-    setupListener();
+    fetchTickets();
 
     return () => {
       isMounted = false;
-      console.log("Tickets SAP: Cleaning up listener.");
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-      }
-      unsubscribeRef.current = () => {};
-      setIsListening(false);
+      console.log("Tickets SAP: Unmounting or user changed.");
+      // No listener to unsubscribe from
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]); // Dependency array includes user
+  // Depend on user and userProfile from context
+  }, [user, userProfile]);
 
   const availableSectors = useMemo(() => {
+     // Use profile from context
      return userProfile?.secteurs?.slice().sort() ?? [];
   }, [userProfile]);
 
   const filteredAndGroupedTickets = useMemo(() => {
-    // Start with tickets that already have raisonSociale (filtered in useEffect)
     let filtered = allTickets;
 
-    // Apply sector filter
     if (selectedSector && selectedSector !== '') {
       filtered = filtered.filter(t => t.secteur === selectedSector);
     }
 
-    // Apply search term filter
     if (searchTerm.trim() !== '') {
       const lowerSearchTerm = searchTerm.trim().toLowerCase();
       filtered = filtered.filter(t =>
-        (t.raisonSociale && t.raisonSociale.toLowerCase().includes(lowerSearchTerm)) || // Search raisonSociale
-        (t.client && t.client.toLowerCase().includes(lowerSearchTerm)) || // Keep searching client field too? Or remove? Assuming keep for now.
+        (t.raisonSociale && t.raisonSociale.toLowerCase().includes(lowerSearchTerm)) ||
+        (t.client && t.client.toLowerCase().includes(lowerSearchTerm)) ||
         (t.id && t.id.toLowerCase().includes(lowerSearchTerm)) ||
         (t.description && t.description.toLowerCase().includes(lowerSearchTerm)) ||
         (t.statut && t.statut.toLowerCase().includes(lowerSearchTerm)) ||
@@ -181,18 +162,15 @@ export default function TicketsSap() {
         (t.telephone && t.telephone.toLowerCase().includes(lowerSearchTerm))
       );
     }
-
-    // Group the filtered tickets by raisonSociale
     return groupTicketsByRaisonSociale(filtered);
   }, [allTickets, selectedSector, searchTerm]);
 
-  // --- Group Sorting Logic ---
   const clientGroups = useMemo(() => {
-    // Find the most recent valid date within a group of tickets
     const findMostRecentDate = (tickets: SapTicket[]): Date | null => {
       let mostRecent: Date | null = null;
       for (const ticket of tickets) {
-        const parsedDate = parseFrenchDate(ticket.date);
+        // Ensure ticket.date is treated as Date | Timestamp | null
+        const parsedDate = parseFrenchDate(ticket.date as Date | Timestamp | null);
         if (parsedDate) {
           if (!mostRecent || parsedDate.getTime() > mostRecent.getTime()) {
             mostRecent = parsedDate;
@@ -202,7 +180,6 @@ export default function TicketsSap() {
       return mostRecent;
     };
 
-    // Convert map entries to an array and calculate the most recent date for each group
     const groupsWithDates = Array.from(filteredAndGroupedTickets.entries()).map(
       ([raisonSociale, tickets]) => ({
         raisonSociale,
@@ -211,40 +188,29 @@ export default function TicketsSap() {
       })
     );
 
-    // Sort the groups based on the mostRecentDate, descending (newest first)
-    // Groups without a valid date will be placed at the end
     groupsWithDates.sort((a, b) => {
-      if (!b.mostRecentDate) return -1; // B has no valid date, A comes first
-      if (!a.mostRecentDate) return 1;  // A has no valid date, B comes first
+      if (!b.mostRecentDate) return -1;
+      if (!a.mostRecentDate) return 1;
       return b.mostRecentDate.getTime() - a.mostRecentDate.getTime();
     });
 
-    // Return the sorted array of groups (without the temporary date used for sorting)
-    // We need the original [raisonSociale, tickets] structure for the mapping below
     return groupsWithDates.map(group => [group.raisonSociale, group.tickets] as [string, SapTicket[]]);
 
   }, [filteredAndGroupedTickets]);
-  // --- End Group Sorting Logic ---
 
-  // --- Call Handling Logic ---
   const handleWebexCall = useCallback((ticketId: string, phoneNumbers: string[]) => {
     if (phoneNumbers.length === 1) {
       window.location.href = `webexphone://call?uri=tel:${phoneNumbers[0]}`;
-      setShowNumberOptions(prevState => ({ ...prevState, [ticketId]: false })); // Ensure dropdown is closed
+      setShowNumberOptions(prevState => ({ ...prevState, [ticketId]: false }));
     } else if (phoneNumbers.length > 1) {
-      // Toggle dropdown visibility for this specific ticket
       setShowNumberOptions(prevState => ({ ...prevState, [ticketId]: !prevState[ticketId] }));
     }
   }, []);
 
   const handleNumberSelection = useCallback((number: string) => {
      window.location.href = `webexphone://call?uri=tel:${number}`;
-     // Close all dropdowns after selection (optional, but good UX)
-     // setShowNumberOptions({}); // Uncomment to close all dropdowns
    }, []);
-   // --- End Call Handling Logic ---
 
-   // --- Modal Handling Logic ---
    const handleTicketClick = (ticket: SapTicket) => {
      console.log("Ticket clicked:", ticket);
      setSelectedTicket(ticket);
@@ -256,18 +222,40 @@ export default function TicketsSap() {
      setSelectedTicket(null);
    };
 
-   // This function is called by the modal when an update happens inside it.
-   // The real-time listener should automatically update the list,
-   // so we might just need to close the modal or do nothing extra here.
+   // Function to manually refresh tickets after an update in the modal
+   const refreshTickets = useCallback(async () => {
+       if (!user || !userProfile) return; // Need user and profile to fetch
+       console.log("Tickets SAP: Refreshing tickets manually...");
+       setIsLoading(true); // Show loading indicator during refresh
+       try {
+           const sectorsToQuery = userProfile.secteurs ?? [];
+           if (sectorsToQuery.length > 0) {
+               const fetchedTickets = await getAllTicketsForSectorsSdk(sectorsToQuery);
+               const ticketsWithRaisonSociale = fetchedTickets.filter(t => t.raisonSociale);
+               setAllTickets(ticketsWithRaisonSociale); // Update the state
+           } else {
+               setAllTickets([]); // Clear if no sectors
+           }
+           setError(null);
+       } catch (err: any) {
+           console.error("Error refreshing tickets:", err);
+           setError(`Erreur lors du rafraîchissement: ${err.message}`);
+       } finally {
+           setIsLoading(false); // Hide loading indicator
+       }
+   }, [user, userProfile]); // Depend on user and profile
+
+   // Update handleTicketUpdated to call refreshTickets
    const handleTicketUpdated = () => {
-     console.log("Ticket update detected from modal, list should refresh via listener.");
+     console.log("Ticket update detected from modal, manually refreshing list.");
+     refreshTickets(); // Call the refresh function
      // Optionally close modal after update:
      // handleCloseModal();
    };
-   // --- End Modal Handling Logic ---
 
 
-  if (!user && !isLoading && !isListening) {
+  // Update initial check to use profile from context
+  if (!user && !isLoading) {
      return (
         <div className="text-center text-jdc-gray-400 py-10">
             Veuillez vous connecter pour voir les tickets SAP.
@@ -280,7 +268,8 @@ export default function TicketsSap() {
       <h1 className="text-2xl font-semibold text-white mb-4 flex items-center">
         <FontAwesomeIcon icon={faTicket} className="mr-3 text-jdc-blue" />
         Gestion des Tickets SAP
-        {isListening && <FontAwesomeIcon icon={faCircleNodes} className="ml-3 text-green-500 text-sm animate-pulse" title="Connexion temps réel active" />}
+        {/* Remove real-time indicator */}
+        {/* {isListening && <FontAwesomeIcon icon={faCircleNodes} className="ml-3 text-green-500 text-sm animate-pulse" title="Connexion temps réel active" />} */}
       </h1>
 
       {/* Filter and Search Controls */}
@@ -311,7 +300,7 @@ export default function TicketsSap() {
         {/* Search Input */}
         <div className="col-span-1 md:col-span-2">
            <Input
-             label="Rechercher (Raison Sociale, Client, ID, SAP, Adresse, Vendeur...)" // Updated label
+             label="Rechercher (Raison Sociale, Client, ID, SAP, Adresse, Vendeur...)"
              id="search-client"
              name="search-client"
              placeholder="Entrez un nom, ID, mot-clé..."
@@ -328,7 +317,7 @@ export default function TicketsSap() {
       {isLoading && (
         <div className="text-center text-jdc-gray-400 py-10">
           <FontAwesomeIcon icon={faSpinner} spin className="text-2xl mr-2" />
-          Chargement et connexion temps réel...
+          Chargement des tickets... {/* Updated loading text */}
         </div>
       )}
 
@@ -346,7 +335,7 @@ export default function TicketsSap() {
           Aucun ticket trouvé correspondant à votre recherche ou filtre (ou sans raison sociale).
         </div>
       )}
-      {/* No Results State (initial load or listener active, no tickets found at all with raison sociale) */}
+      {/* No Results State (initial load, no tickets found at all with raison sociale) */}
        {!isLoading && !error && allTickets.length === 0 && (
          <div className="text-center text-jdc-gray-400 py-10">
            {userProfile?.secteurs && userProfile.secteurs.length > 0
@@ -359,15 +348,13 @@ export default function TicketsSap() {
       {/* Tickets List */}
       {!isLoading && !error && clientGroups.length > 0 && (
         <div className="space-y-3">
-          {/* clientGroups is now sorted by raisonSociale */}
           {clientGroups.map(([raisonSociale, clientTickets]) => (
             <div key={raisonSociale} className="bg-jdc-card rounded-lg shadow overflow-hidden">
-              <details className="group" open={clientGroups.length < 5}> {/* Keep open if few groups */}
+              <details className="group" open={clientGroups.length < 5}>
                 <summary className="flex items-center justify-between p-4 cursor-pointer hover:bg-jdc-gray-800 list-none transition-colors">
                   <div className="flex items-center min-w-0 mr-2">
                     <FontAwesomeIcon icon={faUserTag} className="mr-3 text-jdc-gray-300 text-lg flex-shrink-0" />
                     <div className="min-w-0">
-                        {/* Display raisonSociale */}
                         <span className="font-semibold text-white text-lg block truncate" title={raisonSociale}>{raisonSociale}</span>
                         <span className="ml-0 md:ml-3 text-sm text-jdc-gray-400">
                             ({clientTickets.length} ticket{clientTickets.length > 1 ? 's' : ''})
@@ -380,35 +367,29 @@ export default function TicketsSap() {
                   />
                 </summary>
                 <div className="border-t border-jdc-gray-700 bg-jdc-gray-900 p-4 space-y-3">
-                  {/* Sort tickets by parsed date descending */}
                   {clientTickets.sort((a, b) => {
-                      const dateA = parseFrenchDate(a.date);
-                      const dateB = parseFrenchDate(b.date);
-                      // Handle null dates during sort (e.g., put them at the end)
+                      // Ensure date is treated as Date | Timestamp | null
+                      const dateA = parseFrenchDate(a.date as Date | Timestamp | null);
+                      const dateB = parseFrenchDate(b.date as Date | Timestamp | null);
                       if (!dateB) return -1;
                       if (!dateA) return 1;
                       return dateB.getTime() - dateA.getTime();
                     }).map((ticket) => {
                     const statusStyle = getTicketStatusStyle(ticket.statut);
-
-                    // Parse the date using the new utility function, then format it for display
-                    const parsedDate = parseFrenchDate(ticket.date);
+                    const parsedDate = parseFrenchDate(ticket.date as Date | Timestamp | null);
                     const displayDate = formatDateForDisplay(parsedDate);
-
-                    const phoneNumbersArray = ticket.telephone?.split(',').map((num: string) => num.trim()).filter(num => num) || []; // Cleaned array
+                    const phoneNumbersArray = ticket.telephone?.split(',').map((num: string) => num.trim()).filter(num => num) || [];
 
                     return (
-                      // Add onClick handler and styling to the ticket container
                       <div
                         key={ticket.id}
                         className="border-b border-jdc-gray-700 pb-3 last:border-b-0 text-sm cursor-pointer hover:bg-jdc-gray-800 transition-colors duration-150 p-3 rounded"
                         onClick={() => handleTicketClick(ticket)}
-                        role="button" // Accessibility
-                        tabIndex={0} // Accessibility
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleTicketClick(ticket); }} // Accessibility
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleTicketClick(ticket); }}
                       >
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2">
-                           {/* Left Side: SAP #, Date, Status */}
                            <div className="flex-1 min-w-0 mb-2 md:mb-0 md:mr-4">
                               <div className="flex items-center mb-1">
                                 <FontAwesomeIcon icon={faInfoCircle} className="mr-2 text-jdc-blue w-4 text-center" />
@@ -432,16 +413,14 @@ export default function TicketsSap() {
                                 </span>
                               </div>
                            </div>
-
-                           {/* Right Side: Call Button */}
                            <div className="flex-shrink-0 relative">
                               {phoneNumbersArray.length > 0 && (
                                 <>
                                   <Button
-                                    variant="secondary" // Use an existing variant like 'secondary'
+                                    variant="secondary"
                                     size="sm"
                                     onClick={(e) => {
-                                      e.stopPropagation(); // Prevent card click if needed
+                                      e.stopPropagation();
                                       handleWebexCall(ticket.id, phoneNumbersArray);
                                     }}
                                     className="text-jdc-blue border-jdc-blue hover:bg-jdc-blue hover:text-white"
@@ -453,8 +432,6 @@ export default function TicketsSap() {
                                       <FontAwesomeIcon icon={showNumberOptions[ticket.id] ? faChevronUp : faChevronDown} className="ml-2" />
                                     )}
                                   </Button>
-
-                                  {/* Dropdown for multiple numbers */}
                                   {showNumberOptions[ticket.id] && phoneNumbersArray.length > 1 && (
                                     <div className="absolute right-0 mt-2 w-48 bg-jdc-gray-800 rounded-md shadow-lg z-10 border border-jdc-gray-700">
                                       <ul className="py-1">
@@ -463,10 +440,10 @@ export default function TicketsSap() {
                                             <a
                                               href={`webexphone://call?uri=tel:${number}`}
                                               onClick={(e) => {
-                                                e.stopPropagation(); // Prevent card click when clicking call link
-                                                e.preventDefault(); // Prevent default link behavior
+                                                e.stopPropagation();
+                                                e.preventDefault();
                                                 handleNumberSelection(number);
-                                                setShowNumberOptions(prevState => ({ ...prevState, [ticket.id]: false })); // Close dropdown on selection
+                                                setShowNumberOptions(prevState => ({ ...prevState, [ticket.id]: false }));
                                               }}
                                               className="block px-4 py-2 text-sm text-jdc-gray-200 hover:bg-jdc-blue hover:text-white"
                                             >
@@ -481,8 +458,6 @@ export default function TicketsSap() {
                               )}
                            </div>
                         </div>
-
-                        {/* Bottom Row: Salesperson, Address, Description */}
                         <div className="space-y-1 text-xs">
                            {ticket.deducedSalesperson && (
                              <div className="flex items-center text-jdc-gray-400">
@@ -517,14 +492,12 @@ export default function TicketsSap() {
         </div>
       )}
 
-      {/* Render the Modal */}
       {isModalOpen && selectedTicket && (
         <TicketSAPDetails
           ticket={selectedTicket}
-          // Ensure sectorId is passed correctly. It should be on the ticket object itself.
           sectorId={selectedTicket.secteur}
           onClose={handleCloseModal}
-          onTicketUpdated={handleTicketUpdated}
+          onTicketUpdated={handleTicketUpdated} // Keep this to trigger refresh
         />
       )}
     </div>

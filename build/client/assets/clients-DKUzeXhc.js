@@ -1,0 +1,1 @@
+import{j as t}from"./jsx-runtime-CQPF1LdT.js";const s=()=>[{title:"Clients | JDC Dashboard"}];function n(){return t.jsxs("div",{children:[t.jsx("h1",{className:"text-2xl font-semibold text-white",children:"Gestion des Clients"}),t.jsx("p",{className:"text-jdc-gray-400 mt-2",children:"Page en construction."})]})}export{n as default,s as meta};

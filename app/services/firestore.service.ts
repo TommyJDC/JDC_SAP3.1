@@ -1,135 +1,223 @@
-import {
-  getFirestore,
-  collection,
-  getDocs,
-  query,
-  where,
-  limit,
-  orderBy,
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  deleteDoc, // Import deleteDoc
-  serverTimestamp,
-  onSnapshot, // Import onSnapshot
-  type Unsubscribe, // Import Unsubscribe type
-  // getCountFromServer, // No longer needed
-  type Firestore,
-  type QuerySnapshot,
-  type DocumentData,
-  type SetOptions,
-  Timestamp,
-  startAt, // Added for search
-  endAt,   // Added for search
-  arrayUnion, // Added for updating image URLs array
-  arrayRemove, // Added for removing image URLs
-} from 'firebase/firestore';
-// Firebase Storage n'est plus nécessaire ici
-import { db } from '~/firebase.config'; // Importer seulement db
-import type { UserProfile, SapTicket, Shipment, GeocodeCacheEntry, StatsSnapshot, Article } from '~/types/firestore.types'; // Added Article
-// Import the date parsing utility
+// Import Timestamp and FieldValue directly if needed, but dbAdmin comes from config
+import { Timestamp, FieldValue } from 'firebase-admin/firestore';
+// Import types remain the same
+import type { UserProfile, SapTicket, Shipment, GeocodeCacheEntry, StatsSnapshot, Article } from '~/types/firestore.types';
 import { parseFrenchDate } from '~/utils/dateUtils';
+// Import the initialized admin db instance
+import { dbAdmin } from '~/firebase.admin.config'; // Import the configured instance
+import type * as admin from 'firebase-admin'; // Import admin types if needed elsewhere
 
-// --- Helper for Status Correction ---
-const correctTicketStatus = (ticketData: DocumentData): { correctedStatus: string | null, needsUpdate: boolean } => {
+
+// --- Helper for Status Correction (remains the same, uses data object) ---
+const correctTicketStatus = (ticketData: admin.firestore.DocumentData): { correctedStatus: string | null, needsUpdate: boolean } => {
   let currentStatus = ticketData.statut;
-  const demandeSAPLower = ticketData.demandeSAP?.toLowerCase() ?? ''; // Handle undefined demandeSAP
+  const demandeSAPLower = ticketData.demandeSAP?.toLowerCase() ?? '';
   const needsRmaStatus = demandeSAPLower.includes('demande de rma');
   const isNotRmaStatus = currentStatus !== 'Demande de RMA';
 
-  let correctedStatus: string | null = currentStatus; // Start with current status
+  let correctedStatus: string | null = currentStatus;
   let needsUpdate = false;
 
-  // Logic to automatically set status based on 'demandeSAP' or default to 'Nouveau'
   if (needsRmaStatus && isNotRmaStatus) {
     correctedStatus = 'Demande de RMA';
     needsUpdate = true;
-  } else if (!currentStatus && !needsRmaStatus) { // Only default to Nouveau if not RMA and status is missing
+  } else if (!currentStatus && !needsRmaStatus) {
     correctedStatus = 'Nouveau';
     needsUpdate = true;
   }
 
-  // Return the potentially corrected status and if an update is needed
   return { correctedStatus: correctedStatus ?? null, needsUpdate };
 };
 
 
-// --- User Profile Functions ---
+// --- User Profile Functions (Using Admin SDK) ---
 
-export const getUserProfileSdk = async (uid: string): Promise<UserProfile | null> => {
-  if (!uid) return null;
+/**
+ * Gets a user profile using the Admin SDK.
+ * Assumes the passed `id` is the document ID in the 'users' collection
+ * (could be Firebase UID or Google ID depending on how it's called).
+ */
+export const getUserProfileSdk = async (id: string): Promise<UserProfile | null> => {
+  if (!id) return null;
+  console.log(`[FirestoreService Admin] Getting profile for ID: ${id}`);
   try {
-    const userDocRef = doc(db, 'users', uid);
-    const userDocSnap = await getDoc(userDocRef);
-    if (userDocSnap.exists()) {
-      return { uid: userDocSnap.id, ...userDocSnap.data() } as UserProfile;
+    const userDocRef = dbAdmin.collection('users').doc(id);
+    const userDocSnap = await userDocRef.get();
+    if (userDocSnap.exists) {
+      const data = userDocSnap.data() as any; // Cast to any temporarily
+      // Convert Timestamps to Dates before returning
+      const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined;
+      const updatedAt = data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined;
+      return {
+          uid: id,
+          email: data.email,
+          displayName: data.displayName,
+          role: data.role,
+          secteurs: data.secteurs,
+          createdAt: createdAt,
+          updatedAt: updatedAt,
+       } as UserProfile;
     } else {
-      console.log(`No profile found for UID: ${uid}`);
-      return null;
+      console.log(`[FirestoreService Admin] No profile found for ID: ${id}`);
+      throw new Error(`User profile not found for ID: ${id}`);
     }
-  } catch (error) {
-    console.error("Error fetching user profile:", error);
-    throw new Error("Impossible de récupérer le profil utilisateur.");
+  } catch (error: any) {
+    console.error(`[FirestoreService Admin] Error fetching user profile for ID ${id}:`, error);
+    if (error.message?.includes("not found")) {
+        throw error;
+    }
+    throw new Error(`Impossible de récupérer le profil utilisateur (ID: ${id}). Cause: ${error.message || error}`);
+  }
+};
+
+/**
+ * Creates a user profile using the Admin SDK.
+ * Uses the passed `id` (Firebase UID or Google ID) as the document ID.
+ */
+export const createUserProfileSdk = async (
+  id: string,
+  email: string,
+  displayName: string,
+  initialRole: string = 'Technician'
+): Promise<UserProfile> => {
+  if (!id || !email || !displayName) {
+    throw new Error("ID, email, and display name are required to create a profile.");
+  }
+  console.log(`[FirestoreService Admin] Creating profile for ID: ${id}, Email: ${email}`);
+  try {
+    const userDocRef = dbAdmin.collection('users').doc(id);
+    const docSnap = await userDocRef.get();
+    if (docSnap.exists) {
+        console.warn(`[FirestoreService Admin] Profile already exists for ID: ${id}. Overwriting.`);
+    }
+
+    // Define the data to set, excluding fields handled by FieldValue or the uid itself
+    const newUserProfileDataBase: Omit<UserProfile, 'uid' | 'createdAt' | 'updatedAt'> = {
+      email,
+      displayName,
+      role: initialRole,
+      secteurs: [],
+    };
+
+    // Add the server timestamp during the set operation
+    await userDocRef.set({
+        ...newUserProfileDataBase,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(), // Also set updatedAt on creation
+    });
+    console.log(`[FirestoreService Admin] User profile created/updated successfully for ID: ${id}`);
+
+    // Return the known data immediately. Timestamps will be populated on next read.
+    // Cast to UserProfile, acknowledging timestamps might be FieldValue initially server-side.
+    return { uid: id, ...newUserProfileDataBase } as UserProfile;
+
+  } catch (error: any) {
+    console.error(`[FirestoreService Admin] Error creating user profile for ID ${id}:`, error);
+     if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+        console.error("[FirestoreService Admin] CRITICAL: Firestore permission denied during profile creation. Check service account permissions and Firestore rules.");
+        throw new Error("Permission refusée par Firestore lors de la création du profil.");
+    }
+    throw new Error(`Impossible de créer le profil utilisateur (ID: ${id}). Cause: ${error.message || error}`);
+  }
+};
+
+/**
+ * Updates a user profile using the Admin SDK.
+ */
+export const updateUserProfileSdk = async (uid: string, data: Partial<Omit<UserProfile, 'uid' | 'createdAt' | 'updatedAt'>>): Promise<void> => {
+  if (!uid || !data || Object.keys(data).length === 0) {
+    console.warn("[FirestoreService Admin] Update user profile called with invalid UID or empty data.");
+    return;
+  }
+  console.log(`[FirestoreService Admin] Updating profile for UID: ${uid}`);
+  try {
+    const userDocRef = dbAdmin.collection('users').doc(uid);
+    // Add updatedAt timestamp
+    const updateData = { ...data, updatedAt: FieldValue.serverTimestamp() };
+    await userDocRef.update(updateData);
+    console.log(`[FirestoreService Admin] User profile updated successfully for UID: ${uid}`);
+  } catch (error: any) {
+    console.error(`[FirestoreService Admin] Error updating user profile for UID ${uid}:`, error);
+     if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+        console.error("[FirestoreService Admin] CRITICAL: Firestore permission denied during profile update.");
+        throw new Error("Permission refusée par Firestore lors de la mise à jour du profil.");
+    }
+    throw new Error(`Impossible de mettre à jour le profil utilisateur (UID: ${uid}). Cause: ${error.message || error}`);
+  }
+};
+
+/**
+ * Gets all user profiles using the Admin SDK.
+ */
+export const getAllUserProfilesSdk = async (): Promise<UserProfile[]> => {
+  console.log("[FirestoreService Admin] Fetching all user profiles...");
+  try {
+    const usersCollectionRef = dbAdmin.collection('users');
+    const q = usersCollectionRef.orderBy('email');
+    const querySnapshot = await q.get();
+    const profiles = querySnapshot.docs.map((doc) => {
+        const data = doc.data() as any;
+        const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined;
+        const updatedAt = data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined;
+        return {
+            uid: doc.id,
+            email: data.email,
+            displayName: data.displayName,
+            role: data.role,
+            secteurs: data.secteurs,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+        } as UserProfile
+    });
+    console.log(`[FirestoreService Admin] Fetched ${profiles.length} profiles.`);
+    return profiles;
+  } catch (error: any) {
+    console.error("[FirestoreService Admin] Error fetching all user profiles:", error);
+    throw new Error(`Impossible de récupérer la liste des utilisateurs. Cause: ${error.message || error}`);
   }
 };
 
 
-// --- Article Image Functions ---
+// --- Article Image Functions (Using Admin SDK) ---
 
-/**
- * Adds a new image URL (provenant de Cloudinary ou autre) to the 'imageUrls' array
- * of an article document in Firestore.
- * Uses arrayUnion to avoid duplicates and overwriting existing URLs.
- * @param articleId The ID of the article document.
- * @param imageUrl The new image URL to add.
- * @returns A promise resolving when the update is complete.
- */
 export const addArticleImageUrl = async (articleId: string, imageUrl: string): Promise<void> => {
   if (!articleId || !imageUrl) {
     throw new Error("Article ID and image URL are required.");
   }
-  console.log(`[FirestoreService] Adding image URL to article ${articleId}...`);
+  console.log(`[FirestoreService Admin] Adding image URL to article ${articleId}...`);
   try {
-    const articleDocRef = doc(db, 'articles', articleId);
-    await updateDoc(articleDocRef, {
-      imageUrls: arrayUnion(imageUrl) // Atomically add the new URL to the array
+    const articleDocRef = dbAdmin.collection('articles').doc(articleId);
+    await articleDocRef.update({
+      imageUrls: FieldValue.arrayUnion(imageUrl)
     });
-    console.log(`[FirestoreService] Image URL successfully added to article ${articleId}.`);
+    console.log(`[FirestoreService Admin] Image URL successfully added to article ${articleId}.`);
   } catch (error: any) {
-    console.error(`[FirestoreService] Error adding image URL to article ${articleId}:`, error);
-     if (error.code === 'permission-denied') {
-        throw new Error("Permission refusée pour mettre à jour l'article. Vérifiez les règles de sécurité Firestore.");
-    } else if (error.code === 'not-found') {
+    console.error(`[FirestoreService Admin] Error adding image URL to article ${articleId}:`, error);
+     if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+        throw new Error("Permission refusée pour mettre à jour l'article.");
+    } else if (error.code === 5 || error.code === 'NOT_FOUND') {
         throw new Error(`L'article avec l'ID ${articleId} n'a pas été trouvé.`);
     }
     throw new Error(`Impossible d'ajouter l'URL de l'image à l'article : ${error.message || error.code}`);
   }
 };
 
-/**
- * Removes a specific image URL from the 'imageUrls' array of an article document in Firestore.
- * Uses arrayRemove.
- * @param articleId The ID of the article document.
- * @param imageUrl The image URL to remove.
- * @returns A promise resolving when the update is complete.
- */
 export const deleteArticleImageUrl = async (articleId: string, imageUrl: string): Promise<void> => {
   if (!articleId || !imageUrl) {
     throw new Error("Article ID and image URL are required for deletion.");
   }
-  console.log(`[FirestoreService] Removing image URL from article ${articleId}...`);
+  console.log(`[FirestoreService Admin] Removing image URL from article ${articleId}...`);
   try {
-    const articleDocRef = doc(db, 'articles', articleId);
-    await updateDoc(articleDocRef, {
-      imageUrls: arrayRemove(imageUrl) // Atomically remove the URL from the array
+    const articleDocRef = dbAdmin.collection('articles').doc(articleId);
+    await articleDocRef.update({
+      imageUrls: FieldValue.arrayRemove(imageUrl)
     });
-    console.log(`[FirestoreService] Image URL successfully removed from article ${articleId}.`);
+    console.log(`[FirestoreService Admin] Image URL successfully removed from article ${articleId}.`);
   } catch (error: any) {
-    console.error(`[FirestoreService] Error removing image URL from article ${articleId}:`, error);
-     if (error.code === 'permission-denied') {
-        throw new Error("Permission refusée pour mettre à jour l'article. Vérifiez les règles de sécurité Firestore.");
-    } else if (error.code === 'not-found') {
+    console.error(`[FirestoreService Admin] Error removing image URL from article ${articleId}:`, error);
+     if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+        throw new Error("Permission refusée pour mettre à jour l'article.");
+    } else if (error.code === 5 || error.code === 'NOT_FOUND') {
         throw new Error(`L'article avec l'ID ${articleId} n'a pas été trouvé.`);
     }
     throw new Error(`Impossible de supprimer l'URL de l'image de l'article : ${error.message || error.code}`);
@@ -137,286 +225,131 @@ export const deleteArticleImageUrl = async (articleId: string, imageUrl: string)
 };
 
 
-// --- Article Search Functions ---
+// --- Article Search Functions (Using Admin SDK) ---
 
-/**
- * Searches for articles based on code and/or name criteria.
- * - Code search is exact match (case-sensitive).
- * - Name search is prefix match on 'Désignation' (case-insensitive, assumes 'Désignation' is uppercase).
- *
- * @param criteria An object containing optional 'code' and 'nom' search terms.
- * @param criteria.code The exact article code to search for.
- * @param criteria.nom The partial or full article name (designation) to search for.
- * @returns A promise resolving to an array of unique Article objects matching the criteria.
- */
 export const searchArticles = async (criteria: { code?: string; nom?: string }): Promise<Article[]> => {
   const { code, nom } = criteria;
   const trimmedCode = code?.trim();
   const trimmedNom = nom?.trim();
-  const nomUppercase = trimmedNom?.toUpperCase(); // Convert search name to uppercase
+  const nomUppercase = trimmedNom?.toUpperCase();
 
-  console.log(`[FirestoreService] Searching articles with criteria:`, { code: trimmedCode, nom: trimmedNom });
+  console.log(`[FirestoreService Admin] Searching articles with criteria:`, { code: trimmedCode, nom: trimmedNom });
 
-  // If no criteria provided, return empty array
   if (!trimmedCode && !trimmedNom) {
-    console.log("[FirestoreService] No search criteria provided for articles.");
+    console.log("[FirestoreService Admin] No search criteria provided for articles.");
     return [];
   }
 
-  const articlesCollection = collection(db, 'articles');
-  const resultsMap = new Map<string, Article>(); // Use Map for unique results by ID
+  const articlesCollection = dbAdmin.collection('articles');
+  const resultsMap = new Map<string, Article>();
 
   try {
-    // --- Query 1: Exact Match on Code (if provided) ---
     if (trimmedCode) {
-      const codeQuery = query(articlesCollection, where("Code", "==", trimmedCode));
-      console.log(`[FirestoreService] Executing Code exact match query for: "${trimmedCode}"`);
-      const codeSnapshot = await getDocs(codeQuery);
-      console.log(`[FirestoreService] Code query found ${codeSnapshot.docs.length} matches.`);
+      const codeQuery = articlesCollection.where("Code", "==", trimmedCode);
+      console.log(`[FirestoreService Admin] Executing Code exact match query for: "${trimmedCode}"`);
+      const codeSnapshot = await codeQuery.get();
+      console.log(`[FirestoreService Admin] Code query found ${codeSnapshot.docs.length} matches.`);
       codeSnapshot.docs.forEach(docSnap => {
         const data = docSnap.data();
-        // Basic validation
         if (data.Code && data.Désignation) {
-          const article: Article = {
-            id: docSnap.id,
-            Code: data.Code,
-            Désignation: data.Désignation,
-            ...data // Include other potential fields
-          } as Article;
-          resultsMap.set(docSnap.id, article);
+          resultsMap.set(docSnap.id, { id: docSnap.id, ...data } as Article);
         } else {
-           console.warn(`[FirestoreService] Document ${docSnap.id} matched by Code is missing 'Code' or 'Désignation'.`);
+           console.warn(`[FirestoreService Admin] Document ${docSnap.id} matched by Code is missing 'Code' or 'Désignation'.`);
         }
       });
     }
 
-    // --- Query 2: Prefix Match on Désignation (if provided) ---
-    // Note: This assumes 'Désignation' field exists and is indexed in Firestore.
     if (nomUppercase) {
-      // Requires Firestore index on 'Désignation' (ascending)
-      const endTerm = nomUppercase + '\uf8ff'; // \uf8ff is a very high code point for prefix matching
-      const designationQuery = query(
-        articlesCollection,
-        orderBy("Désignation"), // MUST order by the field being queried
-        startAt(nomUppercase),
-        endAt(endTerm)
-        // limit(20) // Optional: Limit results for performance
-      );
+      const endTerm = nomUppercase + '\uf8ff';
+      const designationQuery = articlesCollection
+        .orderBy("Désignation")
+        .startAt(nomUppercase)
+        .endAt(endTerm);
 
-      console.log(`[FirestoreService] Executing Désignation prefix query (uppercase) for: "${nomUppercase}"`);
-      const designationSnapshot = await getDocs(designationQuery);
-      console.log(`[FirestoreService] Désignation query found ${designationSnapshot.docs.length} potential matches.`);
+      console.log(`[FirestoreService Admin] Executing Désignation prefix query (uppercase) for: "${nomUppercase}"`);
+      const designationSnapshot = await designationQuery.get();
+      console.log(`[FirestoreService Admin] Désignation query found ${designationSnapshot.docs.length} potential matches.`);
 
       designationSnapshot.docs.forEach(docSnap => {
         const data = docSnap.data();
-        // Basic validation
         if (data.Code && data.Désignation) {
-          const article: Article = {
-            id: docSnap.id,
-            Code: data.Code,
-            Désignation: data.Désignation,
-            ...data // Include other potential fields
-          } as Article;
-          // Add to map (will overwrite if already found by code, which is fine)
-          resultsMap.set(docSnap.id, article);
+          resultsMap.set(docSnap.id, { id: docSnap.id, ...data } as Article);
         } else {
-          console.warn(`[FirestoreService] Document ${docSnap.id} matched by Désignation is missing 'Code' or 'Désignation'.`);
+          console.warn(`[FirestoreService Admin] Document ${docSnap.id} matched by Désignation is missing 'Code' or 'Désignation'.`);
         }
       });
     }
 
-    // --- Combine Results ---
     const combinedResults = Array.from(resultsMap.values());
-
-    console.log(`[FirestoreService] Article search completed. Found ${combinedResults.length} unique articles.`);
+    console.log(`[FirestoreService Admin] Article search completed. Found ${combinedResults.length} unique articles.`);
     return combinedResults;
 
   } catch (error: any) {
-    console.error("[FirestoreService] Error executing article search:", error);
-    // Check for specific Firestore errors, e.g., missing index
-    if (error.code === 'failed-precondition' && error.message?.includes('index')) {
-        console.error("[FirestoreService] Firestore Error: Likely missing a composite index. Check the Firestore console error message for a link to create it. You'll likely need an index on 'Désignation' (ascending).");
+    console.error("[FirestoreService Admin] Error executing article search:", error);
+    if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+        console.error("[FirestoreService Admin] Firestore Error: Likely missing a composite index. Check the Firestore console error message for a link to create it. You'll likely need an index on 'Désignation' (ascending).");
         throw new Error("Erreur Firestore: Index manquant requis pour la recherche par nom (sur 'Désignation'). Vérifiez la console Firebase.");
     }
-    throw new Error("Échec de la recherche d'articles."); // Throw a generic error
+    throw new Error(`Échec de la recherche d'articles. Cause: ${error.message || error}`);
   }
 };
 
-export const getAllUserProfilesSdk = async (): Promise<UserProfile[]> => {
-  try {
-    const usersCollectionRef = collection(db, 'users');
-    const q = query(usersCollectionRef, orderBy('email'));
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map((doc) => ({ uid: doc.id, ...doc.data() } as UserProfile));
-  } catch (error) {
-    console.error("Error fetching all user profiles:", error);
-    throw new Error("Impossible de récupérer la liste des utilisateurs.");
-  }
-};
 
-export const createUserProfileSdk = async (
-  uid: string,
-  email: string,
-  displayName: string,
-  initialRole: string = 'Technician'
-): Promise<UserProfile> => {
-  if (!uid || !email || !displayName) {
-    throw new Error("UID, email, and display name are required to create a profile.");
-  }
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    const newUserProfile: Omit<UserProfile, 'uid'> = {
-      email,
-      displayName,
-      role: initialRole,
-      secteurs: [],
-    };
-    await setDoc(userDocRef, newUserProfile);
-    console.log(`User profile created successfully for UID: ${uid}`);
-    return { uid, ...newUserProfile };
-  } catch (error) {
-    console.error("Error creating user profile in Firestore:", error);
-    throw new Error("Impossible de créer le profil utilisateur dans la base de données.");
-  }
-};
+// --- SAP Ticket Functions (Using Admin SDK) ---
 
-export const updateUserProfileSdk = async (uid: string, data: Partial<UserProfile>): Promise<void> => {
-  if (!uid || !data || Object.keys(data).length === 0) {
-    console.warn("Update user profile called with invalid UID or empty data.");
-    return;
-  }
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    await updateDoc(userDocRef, data);
-    console.log(`User profile updated successfully for UID: ${uid}`);
-  } catch (error) {
-    console.error(`Error updating user profile for UID ${uid}:`, error);
-    throw new Error("Impossible de mettre à jour le profil utilisateur.");
-  }
-};
-
-// --- SAP Ticket Functions ---
-
-/**
- * Updates a specific SAP ticket document within its sector collection.
- * @param sectorId The ID of the sector (collection name).
- * @param ticketId The ID of the ticket document to update.
- * @param data An object containing the fields to update.
- */
-export const updateSAPTICKET = async (sectorId: string, ticketId: string, data: Partial<Omit<SapTicket, 'id' | 'secteur'>>): Promise<void> => {
+export const updateSAPTICKET = async (sectorId: string, ticketId: string, data: Partial<Omit<SapTicket, 'id' | 'secteur' | 'date'>>): Promise<void> => {
   if (!sectorId || !ticketId || !data || Object.keys(data).length === 0) {
-    console.warn("updateSAPTICKET called with invalid sectorId, ticketId, or empty data.");
+    console.warn("[FirestoreService Admin] updateSAPTICKET called with invalid sectorId, ticketId, or empty data.");
     throw new Error("Identifiants de secteur/ticket ou données de mise à jour manquants.");
   }
-  console.log(`[FirestoreService] Attempting to update ticket ${ticketId} in sector ${sectorId} with data:`, data);
+  console.log(`[FirestoreService Admin] Attempting to update ticket ${ticketId} in sector ${sectorId} with data:`, data);
   try {
-    // Construct the document reference using the sectorId as the collection name
-    const ticketDocRef = doc(db, sectorId, ticketId);
-    await updateDoc(ticketDocRef, data);
-    console.log(`[FirestoreService] Successfully updated ticket ${ticketId} in sector ${sectorId}.`);
+    const ticketDocRef = dbAdmin.collection(sectorId).doc(ticketId);
+    // Ensure date is not accidentally overwritten with undefined if not provided
+    const updateData = { ...data };
+    if ('date' in updateData) delete (updateData as any).date;
+
+    await ticketDocRef.update(updateData);
+    console.log(`[FirestoreService Admin] Successfully updated ticket ${ticketId} in sector ${sectorId}.`);
   } catch (error: any) {
-    console.error(`[FirestoreService] Error updating ticket ${ticketId} in sector ${sectorId}:`, error);
-    if (error.code === 'permission-denied') {
-      console.error(`[FirestoreService] CRITICAL: Firestore permission denied for update operation on collection '${sectorId}'. Check security rules.`);
-      throw new Error(`Permission refusée par Firestore pour la mise à jour dans le secteur ${sectorId}. Vérifiez les règles de sécurité.`);
-    } else if (error.code === 'not-found') {
-        console.error(`[FirestoreService] Error: Document ${ticketId} not found in collection ${sectorId}.`);
+    console.error(`[FirestoreService Admin] Error updating ticket ${ticketId} in sector ${sectorId}:`, error);
+    if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+      console.error(`[FirestoreService Admin] CRITICAL: Firestore permission denied for update operation on collection '${sectorId}'. Check service account permissions and Firestore rules.`);
+      throw new Error(`Permission refusée par Firestore pour la mise à jour dans le secteur ${sectorId}.`);
+    } else if (error.code === 5 || error.code === 'NOT_FOUND') {
+        console.error(`[FirestoreService Admin] Error: Document ${ticketId} not found in collection ${sectorId}.`);
         throw new Error(`Le ticket ${ticketId} n'a pas été trouvé dans le secteur ${sectorId}.`);
     }
     throw new Error(`Impossible de mettre à jour le ticket SAP ${ticketId}. Cause: ${error.message || error}`);
   }
 };
 
-/**
- * Fetches the most recent SAP tickets for the given sectors (one-time fetch).
- * Applies status correction logic to the returned data but DOES NOT update Firestore.
- */
 export const getRecentTicketsForSectors = async (sectors: string[], count: number = 5): Promise<SapTicket[]> => {
   if (!sectors || sectors.length === 0) return [];
-  console.log(`[FirestoreService] Fetching recent tickets for sectors: ${sectors.join(', ')}`);
+  console.log(`[FirestoreService Admin] Fetching recent tickets for sectors: ${sectors.join(', ')}`);
 
   const ticketPromises = sectors.map(async (sector) => {
     try {
-      const sectorCollectionRef = collection(db, sector);
-      const q = query(
-        sectorCollectionRef,
-        orderBy('date', 'desc'),
-        limit(count) // Limit per sector
-      );
-      const querySnapshot = await getDocs(q);
+      const sectorCollectionRef = dbAdmin.collection(sector);
+      const q = sectorCollectionRef.orderBy('date', 'desc').limit(count);
+      const querySnapshot = await q.get();
        return querySnapshot.docs.map(doc => {
           const data = doc.data();
-          // Use parseFrenchDate to handle various date formats and invalid values
           const parsedDate = parseFrenchDate(data.date);
-          // Apply status correction logic to the data being returned
           const { correctedStatus } = correctTicketStatus(data);
           return {
            id: doc.id,
            ...data,
-            statut: correctedStatus ?? data.statut, // Use corrected status if available
-            secteur: sector, // Add sector info
-            date: parsedDate // Store the parsed Date object or null
+            statut: correctedStatus ?? data.statut,
+            secteur: sector,
+            date: parsedDate
           } as SapTicket;
        });
-    } catch (error) {
-      console.error(`Error fetching tickets for sector ${sector}:`, error);
-      return []; // Return empty array for this sector on error
-    }
-  });
-
-  try {
-     const resultsBySector = await Promise.all(ticketPromises);
-     const allTickets = resultsBySector.flat();
-     // Sort all collected tickets by the parsed date descending, handling nulls
-     allTickets.sort((a, b) => {
-         // a.date and b.date are Date | null here
-         // Handle null dates during sort
-         if (!(b.date instanceof Date)) return -1; // B is null/invalid, A comes first (descending)
-         if (!(a.date instanceof Date)) return 1;  // A is null/invalid, B comes first (descending)
-         // Both are valid Date objects here, safe to call getTime()
-         return b.date.getTime() - a.date.getTime();
-     });
-     console.log(`[FirestoreService] Found ${allTickets.length} tickets across sectors, returning top ${count}`);
-    return allTickets.slice(0, count); // Return only the most recent 'count' tickets overall
-  } catch (error) {
-    console.error("Error merging ticket results:", error);
-    throw new Error("Impossible de récupérer les tickets récents.");
-  }
-};
-
-/**
- * Fetches ALL SAP tickets for the given sectors (one-time fetch).
- * Applies status correction logic to the returned data but DOES NOT update Firestore.
- */
-export const getAllTicketsForSectorsSdk = async (sectors: string[]): Promise<SapTicket[]> => {
-  if (!sectors || sectors.length === 0) {
-    console.log("[FirestoreService] getAllTicketsForSectorsSdk: No sectors provided, returning [].");
-    return [];
-  }
-  console.log(`[FirestoreService] Fetching ALL tickets (one-time) for sectors: ${sectors.join(', ')}`);
-
-  const ticketPromises = sectors.map(async (sector) => {
-    try {
-      const sectorCollectionRef = collection(db, sector);
-      const q = query(sectorCollectionRef, orderBy('date', 'desc'));
-      const querySnapshot = await getDocs(q);
-      console.log(`[FirestoreService] Fetched ${querySnapshot.size} tickets for sector ${sector}.`);
-       return querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          // Use parseFrenchDate to handle various date formats and invalid values
-          const parsedDate = parseFrenchDate(data.date);
-          // Apply status correction logic to the data being returned
-          const { correctedStatus } = correctTicketStatus(data);
-          return {
-           id: doc.id,
-           ...data,
-            statut: correctedStatus ?? data.statut, // Use corrected status if available
-            secteur: sector, // Add sector info
-            date: parsedDate // Store the parsed Date object or null
-          } as SapTicket;
-       });
-    } catch (error) {
-      console.error(`Error fetching ALL tickets for sector ${sector}:`, error);
+    } catch (error: any) {
+      console.error(`[FirestoreService Admin] Error fetching tickets for sector ${sector}:`, error);
+       if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+         console.error(`[FirestoreService Admin] Index missing for ticket query in sector ${sector} (likely on 'date' desc).`);
+       }
       return [];
     }
   });
@@ -424,388 +357,267 @@ export const getAllTicketsForSectorsSdk = async (sectors: string[]): Promise<Sap
   try {
      const resultsBySector = await Promise.all(ticketPromises);
      const allTickets = resultsBySector.flat();
-     // Sort all collected tickets by the parsed date descending, handling nulls
      allTickets.sort((a, b) => {
-         // a.date and b.date are Date | null here
-         // Handle null dates during sort
-         if (!(b.date instanceof Date)) return -1; // B is null/invalid, A comes first (descending)
-         if (!(a.date instanceof Date)) return 1;  // A is null/invalid, B comes first (descending)
-         // Both are valid Date objects here, safe to call getTime()
+         if (!(b.date instanceof Date)) return -1;
+         if (!(a.date instanceof Date)) return 1;
          return b.date.getTime() - a.date.getTime();
      });
-     console.log(`[FirestoreService] Fetched a total of ${allTickets.length} tickets across all specified sectors.`);
+     console.log(`[FirestoreService Admin] Found ${allTickets.length} tickets across sectors, returning top ${count}`);
+    return allTickets.slice(0, count);
+  } catch (error) {
+    console.error("[FirestoreService Admin] Error merging ticket results:", error);
+    throw new Error("Impossible de récupérer les tickets récents.");
+  }
+};
+
+export const getAllTicketsForSectorsSdk = async (sectors: string[]): Promise<SapTicket[]> => {
+  if (!sectors || sectors.length === 0) {
+    console.log("[FirestoreService Admin] getAllTicketsForSectorsSdk: No sectors provided, returning [].");
+    return [];
+  }
+  console.log(`[FirestoreService Admin] Fetching ALL tickets (one-time) for sectors: ${sectors.join(', ')}`);
+
+  const ticketPromises = sectors.map(async (sector) => {
+    try {
+      const sectorCollectionRef = dbAdmin.collection(sector);
+      const q = sectorCollectionRef.orderBy('date', 'desc');
+      const querySnapshot = await q.get();
+      console.log(`[FirestoreService Admin] Fetched ${querySnapshot.size} tickets for sector ${sector}.`);
+       return querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          const parsedDate = parseFrenchDate(data.date);
+          const { correctedStatus } = correctTicketStatus(data);
+          return {
+           id: doc.id,
+           ...data,
+            statut: correctedStatus ?? data.statut,
+            secteur: sector,
+            date: parsedDate
+          } as SapTicket;
+       });
+    } catch (error: any) {
+      console.error(`[FirestoreService Admin] Error fetching ALL tickets for sector ${sector}:`, error);
+       if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+         console.error(`[FirestoreService Admin] Index missing for ticket query in sector ${sector} (likely on 'date' desc).`);
+       }
+      return [];
+    }
+  });
+
+  try {
+     const resultsBySector = await Promise.all(ticketPromises);
+     const allTickets = resultsBySector.flat();
+     allTickets.sort((a, b) => {
+         if (!(b.date instanceof Date)) return -1;
+         if (!(a.date instanceof Date)) return 1;
+         return b.date.getTime() - a.date.getTime();
+     });
+     console.log(`[FirestoreService Admin] Fetched a total of ${allTickets.length} tickets across all specified sectors.`);
     return allTickets;
   } catch (error) {
-    console.error("Error merging ALL ticket results:", error);
+    console.error("[FirestoreService Admin] Error merging ALL ticket results:", error);
     throw new Error("Impossible de récupérer tous les tickets SAP pour les secteurs spécifiés.");
   }
 };
 
-/**
- * Listens for real-time updates on ALL SAP tickets for the given sectors.
- * Applies status correction logic and performs background updates in Firestore if needed.
- *
- * @param sectors Array of sector names (collection names) to listen to.
- * @param callback Function to call with the updated array of SapTicket objects.
- * @param onError Function to call if an error occurs during listening.
- * @returns An object containing unsubscribe functions for each sector listener.
- */
-export const listenToAllTicketsForSectorsSdk = (
-  sectors: string[],
-  callback: (tickets: SapTicket[]) => void,
-  onError: (error: Error) => void
-): { unsubscribe: () => void } => {
-  if (!sectors || sectors.length === 0) {
-    console.log("[FirestoreService] listenToAllTicketsForSectorsSdk: No sectors provided.");
-    // Immediately call callback with empty array? Or let the caller handle it?
-    // callback([]); // Optional: Call immediately if no sectors
-    return { unsubscribe: () => {} }; // Return a no-op unsubscribe function
-  }
-
-  console.log(`[FirestoreService] Setting up REAL-TIME listeners for tickets in sectors: ${sectors.join(', ')}`);
-
-  const sectorListeners: Unsubscribe[] = [];
-  const allTicketsMap = new Map<string, SapTicket>(); // Use Map to store tickets from all sectors, keyed by ID
-
-  sectors.forEach((sector) => {
-    try {
-      const sectorCollectionRef = collection(db, sector);
-      const q = query(sectorCollectionRef, orderBy('date', 'desc')); // Order by date
-
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        console.log(`[FirestoreService] Listener update received for sector: ${sector} (${querySnapshot.size} docs)`);
-        const updatePromises: Promise<void>[] = []; // Store update promises for this snapshot
-
-        // Process changes within this sector
-        querySnapshot.docChanges().forEach((change) => {
-            const docSnap = change.doc;
-            const ticketId = docSnap.id;
-
-            if (change.type === "removed") {
-                allTicketsMap.delete(ticketId);
-                console.log(`[FirestoreService] Ticket removed: ${ticketId} from sector ${sector}`);
-             } else { // 'added' or 'modified'
-                 const data = docSnap.data();
-                 // Use parseFrenchDate here as well
-                 const parsedDate = parseFrenchDate(data.date);
-                 const { correctedStatus, needsUpdate } = correctTicketStatus(data);
-
-                 const ticket: SapTicket = {
-                    id: ticketId,
-                    ...data,
-                     statut: correctedStatus ?? data.statut, // Use corrected status for UI immediately
-                     secteur: sector,
-                     date: parsedDate, // Store the parsed Date or null
-                 } as SapTicket;
-
-                 allTicketsMap.set(ticketId, ticket); // Add or update in the map
-
-                // If status correction is needed, plan a background update
-                if (needsUpdate && correctedStatus !== null) {
-                    console.log(`[FirestoreService] Planning background status update for ticket ${ticketId} in ${sector} to: ${correctedStatus}`);
-                    updatePromises.push(
-                        updateDoc(docSnap.ref, { statut: correctedStatus }).catch(err => {
-                            console.error(`[FirestoreService] FAILED background status update for ticket ${ticketId}:`, err);
-                            // Optional: Revert status in map or notify user? For now, just log.
-                        })
-                    );
-                }
-            }
-        });
-
-
-        // Convert map values to array, sort, and call the main callback
-        const currentAllTickets = Array.from(allTicketsMap.values());
-        // Filter out tickets without raisonSociale before calling back
-         const ticketsWithRaisonSociale = currentAllTickets.filter(t => t.raisonSociale);
-         // Sort by the parsed date descending, handling nulls
-         ticketsWithRaisonSociale.sort((a, b) => {
-             // a.date and b.date are Date | null here
-             // Handle null dates during sort
-             if (!(b.date instanceof Date)) return -1; // B is null/invalid, A comes first (descending)
-             if (!(a.date instanceof Date)) return 1;  // A is null/invalid, B comes first (descending)
-             // Both are valid Date objects here, safe to call getTime()
-             return b.date.getTime() - a.date.getTime();
-         });
-         callback(ticketsWithRaisonSociale);
-
-        // Execute background updates if any were planned for this snapshot
-        if (updatePromises.length > 0) {
-          Promise.all(updatePromises)
-            .then(() => console.log(`[FirestoreService] Finished ${updatePromises.length} background status updates for sector ${sector}.`))
-            .catch(err => console.error(`[FirestoreService] Error during batch background status updates for sector ${sector}:`, err));
-        }
-
-      }, (error) => {
-        console.error(`[FirestoreService] Error listening to sector ${sector}:`, error);
-        onError(new Error(`Erreur d'écoute pour le secteur ${sector}: ${error.message}`));
-        // Potentially unsubscribe other listeners or handle more gracefully
-      });
-
-      sectorListeners.push(unsubscribe);
-
-    } catch (error: any) {
-        console.error(`[FirestoreService] Failed to set up listener for sector ${sector}:`, error);
-        onError(new Error(`Impossible de démarrer l'écoute pour le secteur ${sector}: ${error.message}`));
-    }
-  });
-
-  // Return a single unsubscribe function that calls all individual unsubscribes
-  const unsubscribeAll = () => {
-    console.log(`[FirestoreService] Unsubscribing from ${sectorListeners.length} ticket listeners.`);
-    sectorListeners.forEach(unsub => unsub());
-  };
-
-  return { unsubscribe: unsubscribeAll };
-};
-
-
-/**
- * Counts the total number of SAP tickets across the given sectors using getDocs.
- */
 export const getTotalTicketCountSdk = async (sectors: string[]): Promise<number> => {
   if (!sectors || sectors.length === 0) {
-      console.log("[FirestoreService] getTotalTicketCountSdk: No sectors provided, returning 0.");
+      console.log("[FirestoreService Admin] getTotalTicketCountSdk: No sectors provided, returning 0.");
       return 0;
   }
-  console.log(`[FirestoreService] Counting total tickets via getDocs for sectors: ${sectors.join(', ')}`);
+  console.log(`[FirestoreService Admin] Counting total tickets via aggregate for sectors: ${sectors.join(', ')}`);
 
   const countPromises = sectors.map(async (sector) => {
     try {
-      const sectorCollectionRef = collection(db, sector);
-      const q = query(sectorCollectionRef); // Simple query just to count docs
-      const querySnapshot = await getDocs(q);
-      console.log(`[FirestoreService] Fetched ${querySnapshot.size} docs for sector ${sector} count.`);
-      return querySnapshot.size;
+      const sectorCollectionRef = dbAdmin.collection(sector);
+      const snapshot = await sectorCollectionRef.count().get();
+      const count = snapshot.data().count;
+      console.log(`[FirestoreService Admin] Counted ${count} docs for sector ${sector}.`);
+      return count;
     } catch (error) {
-      console.error(`Error counting tickets via getDocs for sector ${sector}:`, error);
-      return 0; // Return 0 for this sector on error
+      console.error(`[FirestoreService Admin] Error counting tickets via aggregate for sector ${sector}:`, error);
+      return 0;
     }
   });
 
   try {
     const counts = await Promise.all(countPromises);
     const totalCount = counts.reduce((sum, count) => sum + count, 0);
-    console.log(`[FirestoreService] Total ticket count via getDocs across sectors: ${totalCount}`);
+    console.log(`[FirestoreService Admin] Total ticket count via aggregate across sectors: ${totalCount}`);
     return totalCount;
   } catch (error) {
-    console.error("Error summing ticket counts from getDocs:", error);
+    console.error("[FirestoreService Admin] Error summing ticket counts from aggregate:", error);
     throw new Error("Impossible de calculer le nombre total de tickets.");
   }
 };
 
 
-// --- Shipment Functions ---
+// --- Shipment Functions (Using Admin SDK) ---
 
 export const getAllShipments = async (userProfile: UserProfile | null): Promise<Shipment[]> => {
   if (!userProfile) {
-    console.log("[FirestoreService][getAllShipments] Cannot fetch shipments, user profile is null.");
+    console.log("[FirestoreService Admin][getAllShipments] Cannot fetch shipments, user profile is null.");
     return [];
   }
 
-  console.log(`[FirestoreService][getAllShipments] Fetching shipments for user: ${userProfile.uid}, Role: ${userProfile.role}`);
-  const shipmentsCollectionRef = collection(db, 'Envoi');
-  let q;
+  console.log(`[FirestoreService Admin][getAllShipments] Fetching shipments for user: ${userProfile.uid}, Role: ${userProfile.role}`);
+  const shipmentsCollectionRef = dbAdmin.collection('Envoi');
+  let q: admin.firestore.Query<admin.firestore.DocumentData>;
 
   try {
-    // Determine sectors based on role and profile
     const userSectors = userProfile.secteurs ?? [];
 
     if (userProfile.role === 'Admin') {
-        // Admin ALWAYS sees all shipments, regardless of their assigned sectors.
-        console.log("[FirestoreService][getAllShipments] Admin user. Fetching ALL shipments (ignoring profile sectors).");
-        q = query(shipmentsCollectionRef, orderBy('nomClient')); // Order by client name
-        console.log("[FirestoreService][getAllShipments] Query: Fetch all ordered by nomClient");
-
-    } else { // Non-Admin
-      const sectorsToQuery = userSectors;
-      if (sectorsToQuery.length === 0) {
-        console.log(`[FirestoreService][getAllShipments] Non-admin user ${userProfile.uid} has no assigned sectors. Returning empty list.`);
-        return []; // Non-admin with no sectors sees nothing
+        console.log("[FirestoreService Admin][getAllShipments] Admin user. Fetching ALL shipments.");
+        q = shipmentsCollectionRef.orderBy('nomClient');
+    } else {
+      if (userSectors.length === 0) {
+        console.log(`[FirestoreService Admin][getAllShipments] Non-admin user ${userProfile.uid} has no assigned sectors. Returning empty list.`);
+        return [];
       }
-      console.log(`[FirestoreService][getAllShipments] Non-admin user. Querying sectors: ${sectorsToQuery.join(', ')}`);
-      q = query(
-        shipmentsCollectionRef,
-        where('secteur', 'in', sectorsToQuery),
-        orderBy('nomClient') // Order by client name
-      );
-      console.log(`[FirestoreService][getAllShipments] Query: Fetch where secteur IN [${sectorsToQuery.join(', ')}] ordered by nomClient`);
+      console.log(`[FirestoreService Admin][getAllShipments] Non-admin user. Querying sectors: ${userSectors.join(', ')}`);
+      q = shipmentsCollectionRef
+        .where('secteur', 'in', userSectors)
+        .orderBy('nomClient');
     }
 
-    console.log("[FirestoreService][getAllShipments] Executing query...");
-    const querySnapshot = await getDocs(q);
-    console.log(`[FirestoreService][getAllShipments] Query successful. Fetched ${querySnapshot.size} documents.`);
+    console.log("[FirestoreService Admin][getAllShipments] Executing query...");
+    const querySnapshot = await q.get();
+    console.log(`[FirestoreService Admin][getAllShipments] Query successful. Fetched ${querySnapshot.size} documents.`);
 
-    const shipments = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Shipment));
+    const shipments = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        const dateCreation = data.dateCreation instanceof Timestamp ? data.dateCreation.toDate() : undefined;
+        return { id: doc.id, ...data, dateCreation } as Shipment;
+    });
     return shipments;
 
-  } catch (error: any) { // Catch specific error type if possible, otherwise 'any'
-    // --- Enhanced Error Logging ---
-    console.error("[FirestoreService][getAllShipments] Error fetching shipments:", error);
-    // Log the underlying error code and message if available (Firebase errors often have these)
-    if (error.code) {
-        console.error(`[FirestoreService][getAllShipments] Firestore Error Code: ${error.code}`);
-    }
-    if (error.message) {
-        console.error(`[FirestoreService][getAllShipments] Firestore Error Message: ${error.message}`);
-    }
-     // Check specifically for permission denied or missing index errors
-     if (error.code === 'permission-denied') {
-         console.error("[FirestoreService][getAllShipments] CRITICAL: Firestore permission denied. Check security rules for 'Envoi' collection.");
+  } catch (error: any) {
+    console.error("[FirestoreService Admin][getAllShipments] Error fetching shipments:", error);
+    if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+         console.error("[FirestoreService Admin][getAllShipments] CRITICAL: Firestore permission denied. Check service account permissions and Firestore rules.");
          throw new Error("Permission refusée par Firestore. Vérifiez les règles de sécurité.");
-     } else if (error.code === 'failed-precondition' && error.message && error.message.includes("index")) { // Check specifically for index error
-         console.error("[FirestoreService][getAllShipments] CRITICAL: Firestore query requires an index. Check browser console for a link to create it.");
-         throw new Error("Index Firestore manquant. Vérifiez la console du navigateur pour le créer.");
+     } else if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+         console.error("[FirestoreService Admin][getAllShipments] CRITICAL: Firestore query requires an index. Check Firestore console.");
+         throw new Error("Index Firestore manquant. Vérifiez la console Firestore.");
      } else {
-         // Throw the generic error but the detailed logs above should help
-         throw new Error(`Impossible de récupérer la liste des envois. Cause: ${error.message || error}`); // Include original message
+         throw new Error(`Impossible de récupérer la liste des envois. Cause: ${error.message || error}`);
      }
-     // --- End Enhanced Error Logging ---
   }
 };
 
-
 export const getRecentShipmentsForSectors = async (sectors: string[], count: number = 5): Promise<Shipment[]> => {
-  // Determine if we are fetching for specific sectors or all (admin case)
   const fetchAllSectors = !sectors || sectors.length === 0;
 
   if (fetchAllSectors) {
-    console.log(`[FirestoreService] Fetching ${count} recent shipments across ALL sectors (Admin view).`);
+    console.log(`[FirestoreService Admin] Fetching ${count} recent shipments across ALL sectors (Admin view).`);
   } else {
-    console.log(`[FirestoreService] Fetching ${count} recent shipments for sectors: ${sectors.join(', ')}`);
+    console.log(`[FirestoreService Admin] Fetching ${count} recent shipments for sectors: ${sectors.join(', ')}`);
   }
 
   try {
-    const shipmentsCollectionRef = collection(db, 'Envoi');
-    let q; // Declare query variable
+    const shipmentsCollectionRef = dbAdmin.collection('Envoi');
+    let q: admin.firestore.Query<admin.firestore.DocumentData>;
 
-    // Base query constraints: limit
-    // TEMPORARILY REMOVED: orderBy('dateCreation', 'desc') to test if missing field causes issues
-    const queryConstraints = [
-        limit(count) // Limit directly in the query now
-    ];
+    const baseQuery = shipmentsCollectionRef.orderBy('dateCreation', 'desc').limit(count);
 
     if (fetchAllSectors) {
-      // Admin: Query without sector filter, only limit
-      q = query(shipmentsCollectionRef, ...queryConstraints);
+      q = baseQuery;
     } else {
-      // Non-Admin: Query with sector filter and limit
-      // Ensure sectors is not empty before using 'in' query
       if (sectors.length > 0) {
-          q = query(
-              shipmentsCollectionRef,
-              where('secteur', 'in', sectors),
-              ...queryConstraints // Spread the common constraints (only limit now)
-          );
+          q = baseQuery.where('secteur', 'in', sectors);
       } else {
-          // This case should technically not be reached due to the fetchAllSectors logic,
-          // but as a safeguard, return empty if sectors is unexpectedly empty here.
-          console.warn("[FirestoreService] getRecentShipmentsForSectors: Non-admin called with empty sectors array unexpectedly. Returning [].");
+          console.warn("[FirestoreService Admin] getRecentShipmentsForSectors: Non-admin called with empty sectors array unexpectedly. Returning [].");
           return [];
       }
     }
 
-    const querySnapshot = await getDocs(q);
-    // Map documents, converting Timestamp if necessary
+    const querySnapshot = await q.get();
     const shipments = querySnapshot.docs.map((doc) => {
         const data = doc.data();
-        // Convert Firestore Timestamp to JS Date if needed by the component
-        const dateCreation = data.dateCreation instanceof Timestamp
-            ? data.dateCreation.toDate()
-            : (data.dateCreation ? new Date(data.dateCreation) : undefined); // Handle potential string/number dates too
-
+        const dateCreation = data.dateCreation instanceof Timestamp ? data.dateCreation.toDate() : undefined;
         return {
             id: doc.id,
             ...data,
-            dateCreation: dateCreation // Overwrite with JS Date or keep undefined
+            dateCreation: dateCreation
         } as Shipment;
     });
 
-    // No need to sort/slice client-side anymore as query handles it.
-    console.log(`[FirestoreService] Fetched ${shipments.length} recent shipments matching criteria.`);
+    console.log(`[FirestoreService Admin] Fetched ${shipments.length} recent shipments matching criteria.`);
     return shipments;
-  } catch (error) {
-    console.error("Error fetching recent shipments:", error);
-    throw new Error("Impossible de récupérer les envois récents.");
+  } catch (error: any) {
+    console.error("[FirestoreService Admin] Error fetching recent shipments:", error);
+     if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+         console.error("[FirestoreService Admin] CRITICAL: Firestore query requires an index (likely on dateCreation desc). Check Firestore console.");
+         throw new Error("Index Firestore manquant (probablement sur dateCreation). Vérifiez la console Firestore.");
+     }
+    throw new Error(`Impossible de récupérer les envois récents. Cause: ${error.message || error}`);
   }
 };
 
-
-/**
- * Fetches ALL shipments for the given sectors (regardless of status).
- * Used internally by getDistinctClientCountFromEnvoiSdk.
- * MODIFIED: Now respects Admin role to fetch ALL shipments if needed.
- */
 const getAllShipmentsForSectors = async (sectors: string[], isAdmin: boolean): Promise<Shipment[]> => {
-  console.log(`[FirestoreService] getAllShipmentsForSectors: Fetching ALL shipments (any status). Admin: ${isAdmin}, Sectors: ${sectors.join(', ')}`);
+  console.log(`[FirestoreService Admin] getAllShipmentsForSectors: Fetching ALL shipments. Admin: ${isAdmin}, Sectors: ${sectors.join(', ')}`);
 
   try {
-    const shipmentsCollectionRef = collection(db, 'Envoi');
-    let q;
+    const shipmentsCollectionRef = dbAdmin.collection('Envoi');
+    let q: admin.firestore.Query<admin.firestore.DocumentData>;
 
     if (isAdmin) {
-        // Admin fetches ALL shipments, ignoring sectors provided for counting purposes.
-        console.log("[FirestoreService] getAllShipmentsForSectors: Admin detected, fetching all documents.");
-        q = query(shipmentsCollectionRef); // No ordering needed, just fetching all for counting.
+        console.log("[FirestoreService Admin] getAllShipmentsForSectors: Admin detected, fetching all documents.");
+        q = shipmentsCollectionRef;
     } else {
-        // Non-admin fetches only shipments matching their sectors.
         if (!sectors || sectors.length === 0) {
-            console.log("[FirestoreService] getAllShipmentsForSectors: Non-admin with no sectors, returning [].");
+            console.log("[FirestoreService Admin] getAllShipmentsForSectors: Non-admin with no sectors, returning [].");
             return [];
         }
-        console.log(`[FirestoreService] getAllShipmentsForSectors: Non-admin, fetching for sectors: ${sectors.join(', ')}`);
-        q = query(
-          shipmentsCollectionRef,
-          where('secteur', 'in', sectors)
-        );
+        console.log(`[FirestoreService Admin] getAllShipmentsForSectors: Non-admin, fetching for sectors: ${sectors.join(', ')}`);
+        q = shipmentsCollectionRef.where('secteur', 'in', sectors);
     }
 
-    const querySnapshot = await getDocs(q);
-    const shipments = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Shipment));
-    console.log(`[FirestoreService] getAllShipmentsForSectors: Fetched ${shipments.length} total shipments.`);
+    const querySnapshot = await q.get();
+    const shipments = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        const dateCreation = data.dateCreation instanceof Timestamp ? data.dateCreation.toDate() : undefined;
+        return { id: doc.id, ...data, dateCreation } as Shipment;
+    });
+    console.log(`[FirestoreService Admin] getAllShipmentsForSectors: Fetched ${shipments.length} total shipments.`);
     return shipments;
-  } catch (error) {
-    console.error("Error fetching all shipments for sectors:", error);
-    // Consider if this internal function should throw or return empty on error
-    throw new Error("Impossible de récupérer tous les envois pour les secteurs.");
+  } catch (error: any) {
+    console.error("[FirestoreService Admin] Error fetching all shipments for sectors:", error);
+     if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+         console.error("[FirestoreService Admin] CRITICAL: Firestore query requires an index. Check Firestore console.");
+         throw new Error("Index Firestore manquant. Vérifiez la console Firestore.");
+     }
+    throw new Error(`Impossible de récupérer tous les envois pour les secteurs. Cause: ${error.message || error}`);
   }
 };
 
-
-/**
- * Gets the count of distinct clients based on ALL shipments ('Envoi' collection)
- * accessible to the user (all for Admin, sector-specific for others).
- * WARNING: Inefficient for large datasets as it fetches documents.
- */
 export const getDistinctClientCountFromEnvoiSdk = async (userProfile: UserProfile | null): Promise<number> => {
    if (!userProfile) {
-     console.log("[FirestoreService] getDistinctClientCountFromEnvoiSdk: No user profile provided, returning 0.");
+     console.log("[FirestoreService Admin] getDistinctClientCountFromEnvoiSdk: No user profile provided, returning 0.");
      return 0;
    }
 
    const isAdmin = userProfile.role === 'Admin';
    const userSectors = userProfile.secteurs ?? [];
 
-   console.warn(`[FirestoreService] Calculating distinct client count from 'Envoi' documents. Admin: ${isAdmin}, Sectors: ${userSectors.join(', ')}. This can be inefficient.`);
+   console.warn(`[FirestoreService Admin] Calculating distinct client count from 'Envoi' documents. Admin: ${isAdmin}, Sectors: ${userSectors.join(', ')}. This can be inefficient.`);
 
    try {
-     // Fetch shipments based on user role (all for admin, filtered for others)
      const accessibleShipments = await getAllShipmentsForSectors(userSectors, isAdmin);
-     console.log(`[FirestoreService] getDistinctClientCountFromEnvoiSdk: Fetched ${accessibleShipments.length} accessible shipments.`);
+     console.log(`[FirestoreService Admin] getDistinctClientCountFromEnvoiSdk: Fetched ${accessibleShipments.length} accessible shipments.`);
 
      if (accessibleShipments.length === 0) {
-         console.log("[FirestoreService] getDistinctClientCountFromEnvoiSdk: No accessible shipments found, returning 0 distinct clients.");
+         console.log("[FirestoreService Admin] getDistinctClientCountFromEnvoiSdk: No accessible shipments found, returning 0 distinct clients.");
          return 0;
      }
 
      const uniqueClientIdentifiers = new Set<string>();
      accessibleShipments.forEach((shipment) => {
-       // Prioritize codeClient, then nomClient for uniqueness
        let clientIdentifier: string | null = null;
        if (shipment.codeClient && String(shipment.codeClient).trim() !== '') {
          clientIdentifier = String(shipment.codeClient).trim();
        } else if (shipment.nomClient && String(shipment.nomClient).trim() !== '') {
-          // Use nomClient only if codeClient is missing or empty
           clientIdentifier = String(shipment.nomClient).trim();
        }
        if (clientIdentifier) {
@@ -814,50 +626,44 @@ export const getDistinctClientCountFromEnvoiSdk = async (userProfile: UserProfil
      });
 
      const count = uniqueClientIdentifiers.size;
-     console.log(`[FirestoreService] getDistinctClientCountFromEnvoiSdk: Found ${count} distinct clients from accessible 'Envoi' documents.`);
+     console.log(`[FirestoreService Admin] getDistinctClientCountFromEnvoiSdk: Found ${count} distinct clients from accessible 'Envoi' documents.`);
      return count;
    } catch (error) {
-     console.error("[FirestoreService] getDistinctClientCountFromEnvoiSdk: Error calculating distinct client count:", error);
+     console.error("[FirestoreService Admin] getDistinctClientCountFromEnvoiSdk: Error calculating distinct client count:", error);
      throw new Error("Impossible de compter les clients distincts depuis les envois.");
    }
  };
 
-/**
- * Deletes a specific shipment document from the 'Envoi' collection.
- * @param shipmentId The ID of the shipment document to delete.
- */
 export const deleteShipmentSdk = async (shipmentId: string): Promise<void> => {
   if (!shipmentId) {
     throw new Error("Shipment ID is required to delete.");
   }
-  console.log(`[FirestoreService] Attempting to delete shipment with ID: ${shipmentId}`);
+  console.log(`[FirestoreService Admin] Attempting to delete shipment with ID: ${shipmentId}`);
   try {
-    const shipmentDocRef = doc(db, 'Envoi', shipmentId);
-    await deleteDoc(shipmentDocRef);
-    console.log(`[FirestoreService] Successfully deleted shipment: ${shipmentId}`);
+    const shipmentDocRef = dbAdmin.collection('Envoi').doc(shipmentId);
+    await shipmentDocRef.delete();
+    console.log(`[FirestoreService Admin] Successfully deleted shipment: ${shipmentId}`);
   } catch (error: any) {
-    console.error(`[FirestoreService] Error deleting shipment ${shipmentId}:`, error);
-    if (error.code === 'permission-denied') {
-      console.error("[FirestoreService] CRITICAL: Firestore permission denied for delete operation. Check security rules for 'Envoi' collection.");
-      throw new Error("Permission refusée par Firestore pour la suppression. Vérifiez les règles de sécurité.");
+    console.error(`[FirestoreService Admin] Error deleting shipment ${shipmentId}:`, error);
+    if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+      console.error("[FirestoreService Admin] CRITICAL: Firestore permission denied for delete operation.");
+      throw new Error("Permission refusée par Firestore pour la suppression.");
     }
     throw new Error(`Impossible de supprimer l'envoi. Cause: ${error.message || error}`);
   }
 };
 
 
-// --- Stats Snapshot Functions ---
+// --- Stats Snapshot Functions (Using Admin SDK) ---
 
 export const getLatestStatsSnapshotsSdk = async (count: number = 1): Promise<StatsSnapshot[]> => {
-  console.log(`[FirestoreService] Fetching latest ${count} stats snapshot(s) from 'dailyStatsSnapshots'...`);
+  console.log(`[FirestoreService Admin] Fetching latest ${count} stats snapshot(s) from 'dailyStatsSnapshots'...`);
   try {
-    const snapshotsCollectionRef = collection(db, 'dailyStatsSnapshots');
-    const q = query(
-      snapshotsCollectionRef,
-      orderBy('timestamp', 'desc'),
-      limit(count)
-    );
-    const querySnapshot = await getDocs(q);
+    const snapshotsCollectionRef = dbAdmin.collection('dailyStatsSnapshots');
+    const q = snapshotsCollectionRef
+      .orderBy('timestamp', 'desc')
+      .limit(count);
+    const querySnapshot = await q.get();
     const snapshots = querySnapshot.docs.map(doc => {
         const data = doc.data();
         const timestamp = data.timestamp instanceof Timestamp ? data.timestamp.toDate() : (data.timestamp ? new Date(data.timestamp) : new Date(0));
@@ -865,55 +671,62 @@ export const getLatestStatsSnapshotsSdk = async (count: number = 1): Promise<Sta
             id: doc.id,
             timestamp: timestamp,
             totalTickets: data.totalTickets ?? 0,
-            // activeShipments field in snapshot is now unused for dashboard evolution, but kept for potential other uses
             activeShipments: data.activeShipments ?? 0,
-            // IMPORTANT: Ensure 'activeClients' in snapshot represents TOTAL distinct clients (ignoring status)
             activeClients: data.activeClients ?? 0,
         } as StatsSnapshot;
     });
-    console.log(`[FirestoreService] Fetched ${snapshots.length} snapshot(s).`);
+    console.log(`[FirestoreService Admin] Fetched ${snapshots.length} snapshot(s).`);
     return snapshots;
-  } catch (error) {
-    console.error("Error fetching latest stats snapshots:", error);
-    throw new Error("Impossible de récupérer le dernier snapshot de statistiques.");
+  } catch (error: any) {
+    console.error("[FirestoreService Admin] Error fetching latest stats snapshots:", error);
+     if (error.code === 9 || error.code === 'FAILED_PRECONDITION') {
+         console.error("[FirestoreService Admin] CRITICAL: Firestore query requires an index (likely on timestamp desc). Check Firestore console.");
+         throw new Error("Index Firestore manquant (probablement sur timestamp). Vérifiez la console Firestore.");
+     }
+    throw new Error(`Impossible de récupérer le dernier snapshot de statistiques. Cause: ${error.message || error}`);
   }
 };
 
 
-// --- Geocode Cache ---
+// --- Geocode Cache (Using Admin SDK) ---
 const GEOCODE_COLLECTION_NAME = 'geocodes';
 
 export const getGeocodeFromCache = async (address: string): Promise<{ latitude: number; longitude: number } | null> => {
+  console.log(`[FirestoreService Admin] Getting geocode cache for address: ${address}`);
   try {
-    const cacheDocRef = doc(db, GEOCODE_COLLECTION_NAME, address);
-    const docSnap = await getDoc(cacheDocRef);
+    const cacheDocRef = dbAdmin.collection(GEOCODE_COLLECTION_NAME).doc(address);
+    const docSnap = await cacheDocRef.get();
 
-    if (docSnap.exists()) {
+    if (docSnap.exists) {
       const data = docSnap.data() as GeocodeCacheEntry;
-      console.log(`Geocode cache hit for address: ${address}`);
+      console.log(`[FirestoreService Admin] Geocode cache hit for address: ${address}`);
       return { latitude: data.latitude, longitude: data.longitude };
     } else {
-      console.log(`Geocode cache miss for address: ${address}`);
+      console.log(`[FirestoreService Admin] Geocode cache miss for address: ${address}`);
       return null;
     }
   } catch (error) {
-    console.error("Error getting geocode from cache:", error);
-    return null; // Don't throw, just return null on cache error
+    console.error("[FirestoreService Admin] Error getting geocode from cache:", error);
+    return null;
   }
 };
 
 export const saveGeocodeToCache = async (address: string, latitude: number, longitude: number): Promise<void> => {
+   console.log(`[FirestoreService Admin] Saving geocode cache for address: ${address}`);
   try {
-    const cacheDocRef = doc(db, GEOCODE_COLLECTION_NAME, address);
-    const cacheEntry: Omit<GeocodeCacheEntry, 'timestamp'> & { timestamp: any } = {
+    const cacheDocRef = dbAdmin.collection(GEOCODE_COLLECTION_NAME).doc(address);
+    // Use admin.firestore.FieldValue for server timestamp with Admin SDK
+    const cacheEntry: Omit<GeocodeCacheEntry, 'timestamp'> & { timestamp: admin.firestore.FieldValue } = {
       latitude,
       longitude,
-      timestamp: serverTimestamp(), // Use server timestamp
+      timestamp: FieldValue.serverTimestamp(),
     };
-    await setDoc(cacheDocRef, cacheEntry);
-    console.log(`Geocode saved to cache for address: ${address}`);
-  } catch (error) {
-    console.error("Error saving geocode to cache:", error);
-    // Decide if this should throw or just log based on application needs
+    await cacheDocRef.set(cacheEntry);
+    console.log(`[FirestoreService Admin] Geocode saved to cache for address: ${address}`);
+  } catch (error: any) {
+    console.error("[FirestoreService Admin] Error saving geocode to cache:", error);
+     if (error.code === 7 || error.code === 'PERMISSION_DENIED') {
+        console.error("[FirestoreService Admin] CRITICAL: Firestore permission denied saving geocode cache.");
+    }
   }
 };

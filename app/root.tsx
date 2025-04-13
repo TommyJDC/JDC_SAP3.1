@@ -8,12 +8,13 @@ import {
   useLoaderData,
   useLocation,
   useNavigation,
-  useSubmit, // Import useSubmit
-} from "@remix-run/react";
-import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node"; // Import ActionFunctionArgs
-import { json, redirect } from "@remix-run/node"; // Import redirect
-import * as NProgress from 'nprogress'; // Use namespace import
-import nProgressStyles from 'nprogress/nprogress.css?url'; // Import nprogress CSS
+   // useSubmit, // Removed as it was only for client-side logout
+ } from "@remix-run/react";
+ // Consolidate imports from @remix-run/node
+ import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
+ import { json, redirect } from "@remix-run/node";
+ import * as NProgress from 'nprogress'; // Use namespace import
+ import nProgressStyles from 'nprogress/nprogress.css?url'; // Import nprogress CSS
 import globalStylesUrl from "~/styles/global.css?url"; // Import global CSS
 import tailwindStylesUrl from "~/tailwind.css?url"; // Import Tailwind CSS
 import mapboxStylesUrl from 'mapbox-gl/dist/mapbox-gl.css?url'; // Import Mapbox GL CSS
@@ -23,10 +24,13 @@ import { MobileMenu } from "~/components/MobileMenu";
 import { AuthModal } from "~/components/AuthModal";
 import ToastContainer from '~/components/Toast'; // Correct: Import default export
 import { ToastProvider, useToast } from '~/context/ToastContext'; // Import ToastProvider and useToast
-import { onAuthStateChanged, signOut } from "firebase/auth"; // Import signOut
-import { auth } from "~/firebase.config"; // Import Firebase auth instance
-import type { AppUser, UserProfile } from '~/types/firestore.types'; // Import types
-import { getUserProfileSdk } from '~/services/firestore.service'; // *** CORRECTED IMPORT ***
+// Firebase client-side auth imports are removed
+import type { UserProfile } from '~/types/firestore.types'; // Keep UserProfile type
+// Re-introduce client SDK imports for profile fetching
+import { getFirestore, doc, getDoc, Timestamp } from 'firebase/firestore';
+import { db as clientDb } from '~/firebase.config'; // Import client db instance
+import { authenticator } from "~/services/auth.server"; // Import remix-auth authenticator
+import type { UserSession } from "~/services/session.server"; // Import UserSession type
 
 // Define links for CSS
 export const links: LinksFunction = () => [
@@ -39,131 +43,163 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: globalStylesUrl },
   { rel: "stylesheet", href: nProgressStyles },
   { rel: "stylesheet", href: mapboxStylesUrl }, // Add Mapbox GL CSS here
-];
+ ];
 
-// Loader remains the same (client-side auth handling)
-export const loader = async ({ request }: LoaderFunctionArgs) => {
-  console.log("Root Loader: Executing (no server-side auth state here).");
-  return json({ profile: null }); // Return null initially
-};
+ // --- Root Loader: Load ONLY the user session ---
+ export const loader = async ({ request }: LoaderFunctionArgs) => {
+   console.log("Root Loader: Checking authentication state via remix-auth.");
+   // Attempt to get the user session from the request using the authenticator
+   const userSession = await authenticator.isAuthenticated(request); // Returns UserSession or null
 
-// --- Root Action for Logout ---
+   // DO NOT fetch profile here to avoid serialization issues with Timestamps
+   console.log("Root Loader: Returning data:", { user: userSession });
+   return json({ user: userSession });
+ };
+
+// --- Root Action ---
+// Consider removing if no root actions other than logout (handled by /logout) are needed.
 export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const action = formData.get("_action");
-
-  if (action === "logout") {
-    console.log("Root Action: Handling logout request.");
-    return redirect("/"); // Redirect to home page after logout action
-  }
-
-  return json({ ok: false, error: "Invalid action" }, { status: 400 });
+  console.warn("Root Action: Received unexpected action:", action);
+  return json({ ok: false, error: "Invalid root action" }, { status: 400 });
 };
+
+// --- Client-side Profile Fetch Function ---
+// Uses the Firebase Client SDK
+async function getClientUserProfile(userId: string): Promise<UserProfile | null> {
+    if (!userId) return null;
+    console.log(`[getClientUserProfile] Fetching profile client-side for ID: ${userId}`);
+    try {
+        const userDocRef = doc(clientDb, 'users', userId); // Use clientDb
+        const userDocSnap = await getDoc(userDocRef);
+
+        if (userDocSnap.exists()) {
+            const data = userDocSnap.data();
+            // Convert Timestamps to Dates
+            const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined;
+            const updatedAt = data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined;
+            console.log(`[getClientUserProfile] Profile found for ID: ${userId}`);
+            return {
+                uid: userId, // Use the passed userId as uid
+                email: data.email,
+                displayName: data.displayName,
+                role: data.role,
+                secteurs: data.secteurs,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+            } as UserProfile;
+        } else {
+            console.warn(`[getClientUserProfile] No profile found for ID: ${userId}`);
+            return null; // Return null if profile doesn't exist
+        }
+    } catch (error) {
+        console.error(`[getClientUserProfile] Error fetching profile for ID ${userId}:`, error);
+        // Re-throw or return null based on how you want to handle errors
+        throw new Error(`Impossible de récupérer le profil client (ID: ${userId}).`);
+        // return null;
+    }
+}
+
 
 // Main App Component wrapped with ToastProvider
 function App({ children }: { children: ReactNode }) {
+  // Get user session from the root loader
+  const { user } = useLoaderData<typeof loader>(); // user is UserSession | null
   const location = useLocation();
   const navigation = useNavigation();
-  const { addToast } = useToast(); // Use the toast hook
-  const submit = useSubmit(); // Hook for submitting the logout action
+  const { addToast } = useToast();
 
-  // NProgress loading indicator logic
-  useEffect(() => {
-    if (navigation.state === 'idle') NProgress.done();
-    else NProgress.start();
-  }, [navigation.state]);
-
-  // State for user and profile
-  const [user, setUser] = useState<AppUser | null>(null);
+  // State for profile fetched client-side
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true); // Track initial auth check
+  const [profileLoading, setProfileLoading] = useState(false);
 
-  // State for mobile menu and auth modal
+  // State for mobile menu and auth modal (keep these)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
-  // Firebase Auth state listener
+  // NProgress loading indicator logic
   useEffect(() => {
-    console.log("Root Effect: Setting up Firebase Auth listener.");
-    setLoadingAuth(true);
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log("Root Effect: onAuthStateChanged triggered.", firebaseUser);
-      if (firebaseUser) {
-        const appUser: AppUser = {
-          uid: firebaseUser.uid,
-          email: firebaseUser.email,
-          displayName: firebaseUser.displayName,
-        };
-        setUser(appUser);
+    if (navigation.state === 'idle' && !profileLoading) { // Only stop if not loading profile
+        NProgress.done();
+    } else {
+        NProgress.start();
+    }
+   }, [navigation.state, profileLoading]); // Depend on profileLoading too
+
+  // Fetch profile client-side when user session changes
+  useEffect(() => {
+    let isMounted = true;
+    const fetchProfile = async () => {
+      // Use userId from the session object loaded by the root loader
+      const currentUserId = user?.userId;
+
+      if (currentUserId) {
+        console.log(`[App Effect] User session found (userId: ${currentUserId}). Fetching profile client-side...`);
+        setProfileLoading(true);
+        setProfile(null); // Clear previous profile while fetching
         try {
-          console.log(`Root Effect: Fetching profile for UID: ${firebaseUser.uid}`);
-          const userProfile = await getUserProfileSdk(firebaseUser.uid);
-          console.log("Root Effect: Profile fetched:", userProfile);
-          setProfile(userProfile);
-        } catch (error) {
-          console.error("Root Effect: Error fetching user profile:", error);
-          setProfile(null);
-          addToast({ message: 'Erreur lors de la récupération du profil utilisateur.', type: 'error' });
+          // Use the actual client-side fetch function
+          const clientProfile = await getClientUserProfile(currentUserId);
+          if (isMounted) {
+              setProfile(clientProfile); // Set profile (or null if not found)
+              if (!clientProfile) {
+                  console.warn(`[App Effect] Profile not found client-side for userId: ${currentUserId}`);
+                  // Optionally show a toast if profile not found after login
+                  // addToast({ message: 'Profil utilisateur non trouvé.', type: 'warning' });
+              }
+          }
+        } catch (error: any) {
+          console.error("[App Effect] Error fetching profile client-side:", error);
+          if (isMounted) setProfile(null);
+          addToast({ message: `Erreur chargement profil: ${error.message}`, type: 'error' });
+        } finally {
+          if (isMounted) setProfileLoading(false);
         }
       } else {
-        console.log("Root Effect: User signed out.");
-        setUser(null);
-        setProfile(null);
+        console.log("[App Effect] No user session, clearing profile.");
+        if (isMounted) {
+            setProfile(null);
+            setProfileLoading(false); // Ensure loading is false if no user
+        }
       }
-      setLoadingAuth(false); // Auth check complete
-    });
-
-    return () => {
-      console.log("Root Effect: Cleaning up Firebase Auth listener.");
-      unsubscribe();
     };
-  }, [addToast]);
 
-  const toggleMobileMenu = () => setIsMobileMenuOpen(!isMobileMenuOpen);
-  const openAuthModal = () => setIsAuthModalOpen(true);
-  const closeAuthModal = () => setIsAuthModalOpen(false);
+    fetchProfile();
 
-  // --- Logout Handler ---
-  const handleLogout = async () => {
-    console.log("handleLogout: Attempting Firebase sign out...");
-    try {
-      await signOut(auth); // Sign out from Firebase on the client
-      console.log("handleLogout: Firebase sign out successful.");
-      addToast({ message: 'Déconnexion réussie.', type: 'success' });
-      submit({ _action: "logout" }, { method: "post", action: "/" });
-    } catch (error) {
-      console.error("handleLogout: Error signing out:", error);
-      addToast({ message: 'Erreur lors de la déconnexion.', type: 'error' });
-    }
-  };
+    return () => { isMounted = false; };
+  }, [user, addToast]); // Re-run when user session changes
 
-  // Determine if the current route is the dashboard
-  const isDashboard = location.pathname === '/dashboard';
+   const toggleMobileMenu = () => setIsMobileMenuOpen(!isMobileMenuOpen);
+   const openAuthModal = () => setIsAuthModalOpen(true); // Keep for Firebase email/pw modal
+   const closeAuthModal = () => setIsAuthModalOpen(false);
+
+   // Determine if the current route is the dashboard
+   const isDashboard = location.pathname === '/dashboard';
 
   return (
     <>
       <Header
-        user={user}
-        profile={profile} // Pass profile to Header
+        user={user} // Pass UserSession | null
+        profile={profile} // Pass profile from client-side state
         onToggleMobileMenu={toggleMobileMenu}
         onLoginClick={openAuthModal}
-        onLogoutClick={handleLogout} // Pass logout handler
-        loadingAuth={loadingAuth} // Pass loading state
-      />
-      <MobileMenu
+        loadingAuth={navigation.state !== 'idle' || profileLoading} // Indicate loading during navigation or profile fetch
+       />
+       <MobileMenu
         isOpen={isMobileMenuOpen}
         onClose={toggleMobileMenu}
-        user={user}
-        profile={profile} // Pass profile to MobileMenu
+        user={user} // Pass UserSession | null
+        profile={profile} // Pass profile from client-side state
         onLoginClick={openAuthModal}
-        onLogoutClick={handleLogout} // Pass logout handler
-        loadingAuth={loadingAuth} // Pass loading state
+        loadingAuth={navigation.state !== 'idle' || profileLoading} // Indicate loading during navigation or profile fetch
       />
-      <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} />
-      <main className={`container mx-auto px-4 py-6 ${isDashboard ? 'mt-0' : 'mt-16 md:mt-20'}`}>
-         <Outlet context={{ user, profile, loadingAuth }} />
-      </main>
-      <ToastContainer /> {/* Correct: Use the imported default component */}
+       <AuthModal isOpen={isAuthModalOpen} onClose={closeAuthModal} /> {/* Keep for modal login */}
+       <main className={`container mx-auto px-4 py-6 ${isDashboard ? 'mt-0' : 'mt-16 md:mt-20'}`}>
+          {/* Pass user session and client-fetched profile to Outlet context */}
+          <Outlet context={{ user, profile, profileLoading }} />
+       </main>
+       <ToastContainer /> {/* Correct: Use the imported default component */}
     </>
   );
 }

@@ -1,21 +1,22 @@
 import React from 'react';
 import { Link, NavLink } from '@remix-run/react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTimes, faUserCircle, faSignOutAlt, faSignInAlt, faTachometerAlt, faTicketAlt, faTruck, faCog } from '@fortawesome/free-solid-svg-icons'; // Added faCog
-import { Button } from './ui/Button';
-import type { AppUser } from '~/services/auth.service';
-import type { UserProfile } from '~/types/firestore.types'; // Import UserProfile
+ import { faTimes, faUserCircle, faSignOutAlt, faSignInAlt, faTachometerAlt, faTicketAlt, faTruck, faCog } from '@fortawesome/free-solid-svg-icons'; // Added faCog
+ import { Button } from './ui/Button';
+ // Use UserSession from server loader instead of AppUser from client-side auth
+ // import type { AppUser } from '~/services/auth.service';
+ import type { UserSession } from '~/services/session.server'; // Import UserSession
+ import type { UserProfile } from '~/types/firestore.types'; // Import UserProfile
 
-interface MobileMenuProps {
-  isOpen: boolean;
-  onClose: () => void;
-  user: AppUser | null;
-  profile: UserProfile | null; // Use profile from context
-  onLoginClick: () => void;
-  // Add onLogoutClick prop if it's missing
-  onLogoutClick?: () => void; // Make optional or ensure it's always passed
-  loadingAuth: boolean; // Add loadingAuth prop
-}
+ interface MobileMenuProps {
+   isOpen: boolean;
+   onClose: () => void;
+   user: UserSession | null; // Use UserSession type
+   profile: UserProfile | null; // Use profile from context
+   onLoginClick: () => void;
+   // Remove onLogoutClick as it's handled by Header form
+   loadingAuth: boolean; // Add loadingAuth prop
+ }
 
 const navItems = [
   { name: 'Tableau de Bord', to: '/dashboard', icon: faTachometerAlt },
@@ -26,11 +27,11 @@ const navItems = [
 // Define Admin item separately
 const adminItem = { name: 'Admin', to: '/admin', icon: faCog };
 
-const JDC_LOGO_URL = "https://www.jdc.fr/images/logo_jdc_blanc.svg"; // Re-add logo URL if needed
+ const JDC_LOGO_URL = "https://www.jdc.fr/images/logo_jdc_blanc.svg"; // Re-add logo URL if needed
 
-export const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, onClose, user, profile, onLoginClick, onLogoutClick, loadingAuth }) => {
-  const linkActiveClass = "text-jdc-yellow bg-jdc-gray-800";
-  const linkInactiveClass = "text-jdc-gray-300 hover:text-white hover:bg-jdc-gray-700";
+ export const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, onClose, user, profile, onLoginClick, loadingAuth }) => { // Removed onLogoutClick
+   const linkActiveClass = "text-jdc-yellow bg-jdc-gray-800";
+   const linkInactiveClass = "text-jdc-gray-300 hover:text-white hover:bg-jdc-gray-700";
   const linkBaseClass = "flex items-center px-3 py-2 rounded-md text-base font-medium transition-colors";
 
   // Determine if the Admin link should be shown
@@ -107,17 +108,13 @@ export const MobileMenu: React.FC<MobileMenuProps> = ({ isOpen, onClose, user, p
               <div className="flex items-center space-x-2 text-sm text-jdc-gray-300">
                 <FontAwesomeIcon icon={faUserCircle} className="h-6 w-6" />
                 <span className="truncate" title={user.email ?? ''}>
-                  {profile?.displayName || user.displayName || user.email?.split('@')[0]}
-                </span>
-              </div>
-              {onLogoutClick && ( // Conditionally render logout button
-                 <Button variant="secondary" size="sm" onClick={() => { onLogoutClick(); onClose(); }} className="w-full" leftIcon={<FontAwesomeIcon icon={faSignOutAlt} />}>
-                   Déconnexion
-                 </Button>
-              )}
-            </div>
-          ) : (
-            <Button variant="primary" size="sm" onClick={() => { onLoginClick(); onClose(); }} className="w-full" leftIcon={<FontAwesomeIcon icon={faSignInAlt} />}>
+                   {profile?.displayName || user.displayName || user.email?.split('@')[0]}
+                 </span>
+               </div>
+               {/* Logout button removed, handled by Header form */}
+             </div>
+           ) : (
+             <Button variant="primary" size="sm" onClick={() => { onLoginClick(); onClose(); }} className="w-full" leftIcon={<FontAwesomeIcon icon={faSignInAlt} />}>
               Connexion
             </Button>
           )}
