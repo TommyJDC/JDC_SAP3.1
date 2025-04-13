@@ -14,11 +14,13 @@ import {
  import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
  import { json, redirect } from "@remix-run/node";
  import * as NProgress from 'nprogress'; // Use namespace import
- // Removed direct CSS imports with ?url
- import tailwindStylesUrl from "~/tailwind.css?url"; // Keep Tailwind for now (often handled differently)
- import mapboxStylesUrl from 'mapbox-gl/dist/mapbox-gl.css?url'; // Keep Mapbox for now
+ // Import CSS files directly for the links function
+ import tailwindStylesHref from "~/tailwind.css";
+ import globalStylesHref from "~/styles/global.css";
+ import nProgressStylesHref from "nprogress/nprogress.css";
+ import mapboxStylesHref from 'mapbox-gl/dist/mapbox-gl.css'; // Keep Mapbox import without ?url for consistency
 
-import { Header } from "~/components/Header";
+ import { Header } from "~/components/Header";
 import { MobileMenu } from "~/components/MobileMenu";
 import { AuthModal } from "~/components/AuthModal";
 import ToastContainer from '~/components/Toast'; // Correct: Import default export
@@ -37,12 +39,24 @@ import type { UserSession } from "~/services/session.server"; // Import UserSess
    { rel: "preconnect", href: "https://fonts.googleapis.com" },
    { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
    { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" },
-   // App Styles - Use direct paths for links export
-   { rel: "stylesheet", href: tailwindStylesUrl }, // Keep Tailwind import for now
-   { rel: "stylesheet", href: "/styles/global.css" }, // Use path relative to public
-   { rel: "stylesheet", href: "/node_modules/nprogress/nprogress.css" }, // Use path relative to public/node_modules (if copied) or adjust build
-   { rel: "stylesheet", href: mapboxStylesUrl }, // Keep Mapbox import for now
+   // App Styles - Use imported hrefs
+   { rel: "stylesheet", href: tailwindStylesHref },
+   { rel: "stylesheet", href: globalStylesHref },
+   { rel: "stylesheet", href: nProgressStylesHref },
+   { rel: "stylesheet", href: mapboxStylesHref },
  ];
+ // NOTE: Linking directly to node_modules might not work depending on the build process.
+ // A better approach might be to copy nprogress.css to the public/build directory during build
+ // or import it without ?url if Vite handles it correctly via the links function.
+ // Let's try the direct path first. If it fails, we'll adjust.
+ // NOTE: Linking directly to node_modules might not work depending on the build process.
+ // A better approach might be to copy nprogress.css to the public/build directory during build
+ // or import it without ?url if Vite handles it correctly via the links function.
+ // Let's try the direct path first. If it fails, we'll adjust.
+ // NOTE: Linking directly to node_modules might not work depending on the build process.
+ // A better approach might be to copy nprogress.css to the public/build directory during build
+ // or import it without ?url if Vite handles it correctly via the links function.
+ // Let's try the direct path first. If it fails, we'll adjust.
  // NOTE: Linking directly to node_modules might not work depending on the build process.
  // A better approach might be to copy nprogress.css to the public/build directory during build
  // or import it without ?url if Vite handles it correctly via the links function.

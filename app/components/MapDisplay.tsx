@@ -1,17 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from '@remix-run/react';
-import leafletStylesUrl from 'leaflet/dist/leaflet.css?url'; // Import Leaflet CSS directly
+import leafletStylesHref from 'leaflet/dist/leaflet.css'; // Import Leaflet CSS without ?url
 import type { LinksFunction } from '@remix-run/node'; // Import LinksFunction type
+import type { Map as LeafletMap, Marker as LeafletMarker, Layer } from 'leaflet'; // Import Leaflet types
 
 // Add a links function to export the stylesheet
 export const links: LinksFunction = () => [
-  { rel: "stylesheet", href: leafletStylesUrl },
+  { rel: "stylesheet", href: leafletStylesHref }, // Use the new import variable
 ];
 
 // Dynamically import Leaflet only on the client-side
-let L: typeof import('leaflet') | null = null;
+let L: typeof import('leaflet') | null = null; // Keep dynamic import logic
 if (typeof window !== 'undefined') {
-  import('leaflet').then(leaflet => {
+  import('leaflet').then(leaflet => { // Keep dynamic import logic
     L = leaflet;
   });
 }
@@ -30,7 +31,7 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
   markers = [],
 }) => {
   const mapRef = useRef<HTMLDivElement>(null);
-  const mapInstanceRef = useRef<import('leaflet').Map | null>(null);
+  const mapInstanceRef = useRef<LeafletMap | null>(null); // Use imported LeafletMap type
   const [isLeafletLoaded, setIsLeafletLoaded] = useState(L !== null);
   const location = useLocation(); // Use location to trigger re-render on navigation
 
@@ -85,8 +86,8 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
        mapInstanceRef.current.setView(position, zoom);
 
        // Clear existing markers (simple approach, might need optimization for many markers)
-       mapInstanceRef.current.eachLayer((layer) => {
-         if (layer instanceof L!.Marker) {
+       mapInstanceRef.current.eachLayer((layer: Layer) => { // Explicitly type layer
+         if (layer instanceof L!.Marker) { // L! asserts L is not null here
            mapInstanceRef.current?.removeLayer(layer);
          }
        });
