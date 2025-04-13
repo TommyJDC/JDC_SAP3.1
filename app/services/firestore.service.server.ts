@@ -711,6 +711,23 @@ export const getGeocodeFromCache = async (address: string): Promise<{ latitude: 
   }
 };
 
+export const getArticles = async (): Promise<Article[]> => {
+  console.log("[FirestoreService Admin] Fetching all articles...");
+  try {
+    const articlesCollectionRef = dbAdmin.collection('articles');
+    const querySnapshot = await articlesCollectionRef.get();
+    const articles = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }) as Article);
+    console.log(`[FirestoreService Admin] Fetched ${articles.length} articles.`);
+    return articles;
+  } catch (error: any) {
+    console.error("[FirestoreService Admin] Error fetching articles:", error);
+    throw new Error(`Impossible de récupérer les articles. Cause: ${error.message || error}`);
+  }
+};
+
 export const saveGeocodeToCache = async (address: string, latitude: number, longitude: number): Promise<void> => {
    console.log(`[FirestoreService Admin] Saving geocode cache for address: ${address}`);
   try {
