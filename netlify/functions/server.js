@@ -7,8 +7,8 @@ import { createRequestHandler } from "@remix-run/netlify";
 // It might be relative to this file or use an alias defined during build.
 // If using default Remix v2 structure, this import might need adjustment
 // or might be handled differently by the older adapter.
-// Let's try the documented path first.
-import * as build from "@remix-run/dev/server-build";
+// Use relative path to the actual server build output for v1 adapter
+import * as build from "../../build/server/index.js";
 
 export const handler = createRequestHandler({
   build,
