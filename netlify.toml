@@ -1,7 +1,10 @@
 [build]
       command = "npm run build"
       publish = "build/client"
-      # functions = "netlify/functions" # Laissez l'adaptateur gérer cela
+      # Spécifier le répertoire interne peut parfois aider, même si l'adaptateur le gère.
+      # Alternativement, supprimer complètement cette ligne est aussi une option.
+      # Essayons de le spécifier pour voir si cela résout le problème 404.
+      functions = ".netlify/functions-internal"
 
     [dev]
       command = "npm run dev"
