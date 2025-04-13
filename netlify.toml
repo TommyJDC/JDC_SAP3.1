@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build:netlify-fn && npm run build" # Build functions first, then Remix app
+  publish = "public"
+  functions = "netlify/functions-built" # Point to the built functions directory
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Cache-Control = "no-cache"

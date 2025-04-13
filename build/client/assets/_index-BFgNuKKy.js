@@ -1,1 +1,0 @@
-import{j as e}from"./jsx-runtime-CQPF1LdT.js";function r(){return e.jsx("div",{className:"p-6 text-center",children:e.jsx("h1",{className:"text-xl text-jdc-gray-300",children:"Redirection vers le tableau de bord..."})})}export{r as default};

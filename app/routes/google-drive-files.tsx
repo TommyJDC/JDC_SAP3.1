@@ -12,6 +12,12 @@ interface GoogleDriveFile {
   webViewLink?: string;
 }
 
+// Define the possible structure of the data returned by the loader
+interface LoaderData {
+  files: GoogleDriveFile[];
+  error?: string; // Error message is optional
+}
+
 interface GoogleDriveFilesListResponse {
   files: GoogleDriveFile[];
   nextPageToken?: string;
@@ -81,7 +87,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
 // Component to display the files
 export default function GoogleDriveFiles() {
-  const { files, error } = useLoaderData<typeof loader>();
+  // Use the explicit LoaderData interface
+  const { files, error } = useLoaderData<LoaderData>();
 
   return (
     <div className="space-y-4">
