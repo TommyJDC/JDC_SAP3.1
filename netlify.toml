@@ -1,7 +1,7 @@
 [build]
-  command = "npm run build:netlify-fn && npm run build" # Build functions first, then Remix app
+  command = "npm run build" # Use the standard build command from package.json
   publish = "public"
-  functions = "netlify/functions-built" # Point to the built functions directory
+  functions = "netlify/functions" # Default Netlify functions directory
 
 [[headers]]
   for = "/*"

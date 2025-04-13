@@ -4,11 +4,10 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "npm run build:netlify-fn && remix build",
+    "build": "remix build",
     "dev": "remix dev",
     "start": "remix-serve build",
-    "start:server": "node server.js",
-    "build:netlify-fn": "esbuild netlify/functions/google-buckets.js --bundle --outfile=netlify/functions-built/google-buckets.js --platform=node --format=cjs --external:@google-cloud/storage --external:google-gax"
+    "start:server": "node server.js"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^6.5.2",
@@ -58,7 +57,6 @@
     "tailwindcss": "^3.4.3",
     "typescript": "^5.1.6",
     "vite": "^5.1.0",
-    "vite-plugin-node-polyfills": "^0.23.0",
     "vite-tsconfig-paths": "^4.2.1"
   },
   "engines": {

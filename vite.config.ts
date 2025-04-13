@@ -1,23 +1,10 @@
 import { vitePlugin as remix } from "@remix-run/dev";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
-import { nodePolyfills } from 'vite-plugin-node-polyfills'; // Import the plugin
+// Removed import for nodePolyfills
 
 export default defineConfig({
-  plugins: [
-    remix(),
-    tsconfigPaths(),
-    nodePolyfills({
-      // Options (optional): specify whether to polyfill specific globals
-      globals: {
-        Buffer: true, // Default: true. Example: provide a Buffer polyfill
-        global: true, // Default: true
-        process: true, // Default: true
-      },
-      // Specify whether to polyfill specific protocol imports
-      protocolImports: true, // Default: true. Polyfills imports like "node:fs"
-    }),
-  ],
+  plugins: [remix(), tsconfigPaths()], // Removed nodePolyfills plugin
   server: {
     watch: {
       ignored: ['**/netlify/**'], // Ignore netlify directory for dev server watcher
