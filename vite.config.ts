@@ -4,22 +4,11 @@ import tsconfigPaths from "vite-tsconfig-paths";
 // Removed import for nodePolyfills
 
 export default defineConfig({
-  plugins: [remix(), tsconfigPaths()], // Removed nodePolyfills plugin
-  server: {
-    watch: {
-      ignored: ['**/netlify/**'], // Ignore netlify directory for dev server watcher
-    }
-  },
-  esbuild: {
-    platform: 'node', // Set esbuild platform to node
-  },
+  plugins: [remix(), tsconfigPaths()],
+  // Removed server.watch.ignored
+  // Removed esbuild.platform
   build: {
-    target: 'es2020',
+    target: 'es2020', // Keep build target
   },
-  ssr: {
-    target: 'node',
-    // Explicitly mark problematic packages as external for SSR build
-    external: ['@google-cloud/storage', 'google-gax'], 
-    // Remove noExternal to allow Vite to handle node_modules correctly
-  }
+  // Removed ssr config block
 });
