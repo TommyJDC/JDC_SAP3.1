@@ -14,11 +14,11 @@ import { type ReactNode, useEffect, useState, Suspense } from 'react';
      import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
      import { json, redirect } from "@remix-run/node";
      import * as NProgress from 'nprogress'; // Use namespace import
-     // Import CSS files directly for side effects (Vite should handle injection)
-     import "~/tailwind.css";
-     import "~/styles/global.css";
-     import "nprogress/nprogress.css";
-     import 'mapbox-gl/dist/mapbox-gl.css';
+     // Import CSS files using ?url suffix for Vite compatibility in links function
+     import tailwindStylesHref from "~/tailwind.css?url";
+     import globalStylesHref from "~/styles/global.css?url";
+     import nProgressStylesHref from "nprogress/nprogress.css?url";
+     import mapboxStylesHref from 'mapbox-gl/dist/mapbox-gl.css?url'; // Import Mapbox CSS with ?url
 
      import { Header } from "~/components/Header";
     import { MobileMenu } from "~/components/MobileMenu";
@@ -33,8 +33,18 @@ import { type ReactNode, useEffect, useState, Suspense } from 'react';
     import { authenticator } from "~/services/auth.server"; // Import remix-auth authenticator
     import type { UserSession } from "~/services/session.server"; // Import UserSession type
 
-     // Remove links function as CSS is imported directly now
-     // export const links: LinksFunction = () => [ ... ];
+     // Define links for CSS
+     export const links: LinksFunction = () => [
+       // Google Fonts - Roboto
+       { rel: "preconnect", href: "https://fonts.googleapis.com" },
+       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" },
+       // App Styles - Use imported hrefs
+       { rel: "stylesheet", href: tailwindStylesHref },
+       { rel: "stylesheet", href: globalStylesHref },
+       { rel: "stylesheet", href: nProgressStylesHref },
+       { rel: "stylesheet", href: mapboxStylesHref },
+     ];
 
      // --- Root Loader: Load ONLY the user session ---
      export const loader = async ({ request }: LoaderFunctionArgs) => {

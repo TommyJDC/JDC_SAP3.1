@@ -1,13 +1,13 @@
 [build]
-  command = "npm run build"
-  publish = "build/client"
-  functions = "netlify/functions"
+      command = "npm run build"
+      publish = "build/client"
+      # functions = "netlify/functions" # Laissez l'adaptateur gérer cela
 
-[dev]
-  command = "npm run dev"
-  framework = "vite"
+    [dev]
+      command = "npm run dev"
+      framework = "vite"
 
-[[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/server"
-  status = 200
+    [[redirects]]
+      from = "/*"
+      to = "/.netlify/functions/server"
+      status = 200
