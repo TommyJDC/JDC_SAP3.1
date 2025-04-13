@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import axios from 'axios';
+// Removed axios import
 import { getGeocodeFromCache, saveGeocodeToCache } from '~/services/firestore.service.server';
 import type { GeocodeCacheEntry } from '~/types/firestore.types';
 
@@ -100,12 +100,27 @@ const useGeoCoding = (addresses: string[]): UseGeoCodingResult => {
           if (signal.aborted) throw new Error('Request aborted');
           console.log(`[useGeoCoding] Cache miss. Calling OpenCage API for: "${addr}"`);
           const url = `https://api.opencagedata.com/geocode/v1/json?q=${encodeURIComponent(addr)}&key=${apiKey}&language=fr&pretty=1`;
-          const response = await axios.get<OpenCageResponse>(url, { signal });
+          // Use fetch instead of axios
+          const response = await fetch(url, { signal });
 
           if (signal.aborted) throw new Error('Request aborted');
 
-          if (response.data?.results?.length > 0) {
-            const { lat, lng } = response.data.results[0].geometry;
+          if (!response.ok) {
+            // Handle fetch errors (non-2xx responses)
+            let errorMessage = `Erreur API (${response.status})`;
+            try {
+                const errorData = await response.json();
+                errorMessage = `Erreur API (${response.status}): ${errorData?.status?.message || 'Erreur inconnue'}`;
+                if (response.status === 401 || response.status === 403) errorMessage = 'Clé API invalide';
+                else if (response.status === 402) errorMessage = 'Quota API dépassé';
+            } catch (e) { /* Ignore JSON parsing error if body is not JSON */ }
+            throw new Error(errorMessage);
+          }
+
+          const data: OpenCageResponse = await response.json();
+
+          if (data?.results?.length > 0) {
+            const { lat, lng } = data.results[0].geometry;
             console.log(`[useGeoCoding] Geocoded "${addr}" to:`, { lat, lng });
             // 3. Store result in Firestore Cache (using saveGeocodeToCache which now uses 'geocodes')
             saveGeocodeToCache(normalizedAddr, lat, lng).catch(cacheErr => {
@@ -119,21 +134,14 @@ const useGeoCoding = (addresses: string[]): UseGeoCodingResult => {
             return [normalizedAddr, null];
           }
         } catch (err: any) {
-          if (axios.isCancel(err) || (err.message && err.message.includes('aborted'))) {
+          // Check specifically for AbortError for fetch
+          if (err.name === 'AbortError' || (err.message && err.message.includes('aborted'))) {
              console.log(`[useGeoCoding] Geocode request aborted for "${addr}"`);
              return [normalizedAddr, null]; // Return null for aborted requests, matching Coordinates type
           }
           console.error(`[useGeoCoding] Error geocoding address "${addr}":`, err);
-          let errorMessage = 'Erreur de géocodage';
-           if (axios.isAxiosError(err)) {
-             if (err.response) {
-               errorMessage = `Erreur API (${err.response.status}): ${err.response.data?.status?.message || 'Erreur inconnue'}`;
-               if (err.response.status === 401 || err.response.status === 403) errorMessage = 'Clé API invalide';
-               else if (err.response.status === 402) errorMessage = 'Quota API dépassé';
-             } else if (err.request) {
-               errorMessage = 'Pas de réponse du serveur';
-             }
-           }
+          // Use the error message directly if it's an Error object, otherwise default
+          let errorMessage = err instanceof Error ? err.message : 'Erreur de géocodage';
           // Check if the error is specifically a Firestore permission error
           if (err.code === 'permission-denied') {
              errorMessage = "Permission refusée pour l'écriture dans le cache de géocodage.";

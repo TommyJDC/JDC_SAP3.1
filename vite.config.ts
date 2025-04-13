@@ -10,10 +10,5 @@ export default defineConfig({
   build: {
     target: 'es2020', // Keep build target
   },
-  ssr: {
-    target: 'node',
-    // Force include axios in the server bundle, keep GCP external
-    noExternal: ['axios'],
-    external: ['@google-cloud/storage', 'google-gax'],
-  }
+  // Removed ssr config block as external/noExternal are no longer needed
 });
