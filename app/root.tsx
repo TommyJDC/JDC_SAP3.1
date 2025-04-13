@@ -14,10 +14,9 @@ import {
  import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node";
  import { json, redirect } from "@remix-run/node";
  import * as NProgress from 'nprogress'; // Use namespace import
- import nProgressStyles from 'nprogress/nprogress.css?url'; // Import nprogress CSS
-import globalStylesUrl from "~/styles/global.css?url"; // Import global CSS
-import tailwindStylesUrl from "~/tailwind.css?url"; // Import Tailwind CSS
-import mapboxStylesUrl from 'mapbox-gl/dist/mapbox-gl.css?url'; // Import Mapbox GL CSS
+ // Removed direct CSS imports with ?url
+ import tailwindStylesUrl from "~/tailwind.css?url"; // Keep Tailwind for now (often handled differently)
+ import mapboxStylesUrl from 'mapbox-gl/dist/mapbox-gl.css?url'; // Keep Mapbox for now
 
 import { Header } from "~/components/Header";
 import { MobileMenu } from "~/components/MobileMenu";
@@ -32,18 +31,22 @@ import { db as clientDb } from '~/firebase.config'; // Import client db instance
 import { authenticator } from "~/services/auth.server"; // Import remix-auth authenticator
 import type { UserSession } from "~/services/session.server"; // Import UserSession type
 
-// Define links for CSS
-export const links: LinksFunction = () => [
-  // Google Fonts - Roboto
-  { rel: "preconnect", href: "https://fonts.googleapis.com" },
-  { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
-  { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" },
-  // App Styles
-  { rel: "stylesheet", href: tailwindStylesUrl },
-  { rel: "stylesheet", href: globalStylesUrl },
-  { rel: "stylesheet", href: nProgressStyles },
-  { rel: "stylesheet", href: mapboxStylesUrl }, // Add Mapbox GL CSS here
+ // Define links for CSS
+ export const links: LinksFunction = () => [
+   // Google Fonts - Roboto
+   { rel: "preconnect", href: "https://fonts.googleapis.com" },
+   { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+   { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" },
+   // App Styles - Use direct paths for links export
+   { rel: "stylesheet", href: tailwindStylesUrl }, // Keep Tailwind import for now
+   { rel: "stylesheet", href: "/styles/global.css" }, // Use path relative to public
+   { rel: "stylesheet", href: "/node_modules/nprogress/nprogress.css" }, // Use path relative to public/node_modules (if copied) or adjust build
+   { rel: "stylesheet", href: mapboxStylesUrl }, // Keep Mapbox import for now
  ];
+ // NOTE: Linking directly to node_modules might not work depending on the build process.
+ // A better approach might be to copy nprogress.css to the public/build directory during build
+ // or import it without ?url if Vite handles it correctly via the links function.
+ // Let's try the direct path first. If it fails, we'll adjust.
 
  // --- Root Loader: Load ONLY the user session ---
  export const loader = async ({ request }: LoaderFunctionArgs) => {
