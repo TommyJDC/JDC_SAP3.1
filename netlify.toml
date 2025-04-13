@@ -1,7 +1,7 @@
 [build]
       command = "npm run build"
       publish = "build/client"
-      # functions = ".netlify/functions-internal" # Supprimons cette ligne pour laisser Netlify détecter les deux emplacements
+      functions = ".netlify/functions" # Supprimons cette ligne pour laisser Netlify détecter les deux emplacements
 
     [dev]
       command = "npm run dev"
