@@ -98,6 +98,20 @@ export interface GeocodeCacheEntry {
 // or JS Dates) throughout your application where these types are used.
 // Conversion often happens when fetching/sending data.
 
+/**
+ * Represents an Article document from the 'articles' collection in Firestore.
+ * Fields based on the search function in firestore.service.ts.
+ */
+export interface Article {
+  id: string; // Document ID from Firestore
+  Code: string; // Article code (exact match search)
+  Désignation: string; // Article name/designation (stored in uppercase, prefix search)
+  imageUrls?: string[]; // Optional: Array of Cloud Storage image URLs
+  collectionSource?: string; // Optional: Source collection if applicable (e.g., 'CHR', 'HACCP')
+  // Add any other relevant fields from your 'articles' documents
+  // e.g., prix?: number; stock?: number; fournisseur?: string;
+}
+
 
 // --- Dashboard Specific Types ---
 

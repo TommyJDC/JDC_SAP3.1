@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-// Import the standard getFirestore
-import { getFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore"; // Import Firestore
+// Storage n'est plus initialisé ici
 
 // Your web app's Firebase configuration (Keep using environment variables in production)
 const firebaseConfig = {
@@ -21,7 +21,8 @@ const auth = getAuth(app);
 
 // Initialize Firestore using the standard method
 const db = getFirestore(app);
+// Cloud Storage n'est plus initialisé ici
 
 // const analytics = getAnalytics(app); // Optional
 
-export { app, auth, db };
+export { app, auth, db }; // Ne plus exporter storage

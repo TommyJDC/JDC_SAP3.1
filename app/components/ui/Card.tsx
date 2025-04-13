@@ -8,7 +8,8 @@ interface CardProps {
 
 export const Card: React.FC<CardProps> = ({ children, className = '', as = 'div' }) => {
   const Tag = as;
-  const baseStyle = "bg-jdc-card rounded-lg shadow-lg overflow-hidden"; // Added overflow-hidden
+  // Added transition, hover transform, and hover shadow classes
+  const baseStyle = "bg-jdc-card rounded-lg shadow-lg overflow-hidden transition duration-200 ease-in-out hover:-translate-y-0.5 hover:shadow-xl";
 
   return (
     <Tag className={`${baseStyle} ${className}`}>

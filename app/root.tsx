@@ -30,6 +30,11 @@ import { getUserProfileSdk } from '~/services/firestore.service'; // *** CORRECT
 
 // Define links for CSS
 export const links: LinksFunction = () => [
+  // Google Fonts - Roboto
+  { rel: "preconnect", href: "https://fonts.googleapis.com" },
+  { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+  { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" },
+  // App Styles
   { rel: "stylesheet", href: tailwindStylesUrl },
   { rel: "stylesheet", href: globalStylesUrl },
   { rel: "stylesheet", href: nProgressStyles },
@@ -174,7 +179,7 @@ export default function Document() {
         <Meta />
         <Links />
       </head>
-      <body className="h-full font-sans">
+      <body className="h-full font-sans text-jdc-gray-300"> {/* Added default text color */}
         <ToastProvider>
            {/* App should wrap the actual content */}
            <App>

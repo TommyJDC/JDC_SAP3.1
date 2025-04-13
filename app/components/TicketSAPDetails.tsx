@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react'; // Added useCallback
 import ReactDOM from 'react-dom'; // Import ReactDOM for createPortal
 // Use ~ alias for imports relative to the app root
 import useGeminiSummary from '~/hooks/useGeminiSummary';
-import { updateSAPTICKET } from '~/services/firestore.service';
+import { updateSAPTICKET } from '~/services/firestore.service'; // Already imported
 import ReactMarkdown from 'react-markdown';
 import { FaSpinner } from 'react-icons/fa';
 import type { SapTicket } from '~/types/firestore.types'; // Import the central type
@@ -52,107 +52,152 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
     const [isAddingComment, setIsAddingComment] = useState<boolean>(false);
 
     // --- AI Summary ---
-    // Use descriptionProbleme if available, otherwise fall back to description
-    const problemDescriptionForAI = ticket?.descriptionProbleme || ticket?.description || '';
+    // Use demandeSAP as the primary source for the AI prompt, fallback if needed (though demandeSAP seems most relevant based on structure)
+    const problemDescriptionForAI = ticket?.demandeSAP || ticket?.descriptionProbleme || ticket?.description || '';
     const summaryPrompt = useMemo(() => {
-        if (!problemDescriptionForAI || ticket?.summary) return '';
-        return `Résume ce problème SAP en 1 ou 2 phrases maximum, en français: ${problemDescriptionForAI}`;
-    }, [ticket?.id, problemDescriptionForAI, ticket?.summary]);
+        // RESTORED CACHE CHECK: Generate prompt only if we have a description AND no cached summary exists.
+        // Diagnostic logs removed.
+        if (!problemDescriptionForAI || ticket?.summary) {
+             return '';
+        }
+        // Ensure the prompt is concise enough for the AI model's input limits if necessary, but demandeSAP seems okay for now.
+        const prompt = `Résume ce problème SAP en 1 ou 2 phrases maximum, en français: ${problemDescriptionForAI}`;
+        return prompt;
+    }, [ticket?.id, problemDescriptionForAI, ticket?.summary]); // Restore ticket?.summary dependency
 
     const {
         summary: generatedSummary,
         isLoading: isSummaryLoading,
         error: summaryError,
-        generateSummary: triggerSummaryGeneration
-    } = useGeminiSummary(GEMINI_API_KEY); // Pass API Key to the hook
+        generateSummary: triggerSummaryGeneration,
+        isCached: isSummaryCached, // Get isCached state
+        resetSummaryState: resetSummaryHookState // Get reset function
+    } = useGeminiSummary(GEMINI_API_KEY);
 
     // --- AI Solution ---
+    // Use a separate instance of the hook for the solution, also using demandeSAP primarily
     const solutionPrompt = useMemo(() => {
-        if (!problemDescriptionForAI || ticket?.solution) return '';
-         return `Propose une solution concise (1-2 phrases), en français, pour ce problème SAP: ${problemDescriptionForAI}`;
-    }, [ticket?.id, problemDescriptionForAI, ticket?.solution]);
+        // RESTORED CACHE CHECK: Generate prompt only if we have a description AND no cached solution exists.
+        // Diagnostic logs removed.
+        if (!problemDescriptionForAI || ticket?.solution) {
+            return '';
+        }
+         const prompt = `Propose une solution concise (1-2 phrases), en français, pour ce problème SAP: ${problemDescriptionForAI}`;
+         return prompt;
+    }, [ticket?.id, problemDescriptionForAI, ticket?.solution]); // Restore ticket?.solution dependency
 
     const {
         summary: generatedSolution,
         isLoading: isSolutionLoading,
         error: solutionError,
-        generateSummary: triggerSolutionGeneration
-    } = useGeminiSummary(GEMINI_API_KEY); // Pass API Key to the hook
+        generateSummary: triggerSolutionGeneration,
+        isCached: isSolutionCached, // Get isCached state
+        resetSummaryState: resetSolutionHookState // Get reset function
+    } = useGeminiSummary(GEMINI_API_KEY);
+
+    // --- Callbacks for Saving ---
+    const handleSaveSummary = useCallback(async (summaryToSave: string) => {
+        if (!ticket || !sectorId) return;
+        console.log(`[TicketSAPDetails] Calling updateSAPTICKET to save SUMMARY for ticket ${ticket.id}`);
+        setUpdateError(null); // Clear previous update errors
+        try {
+            await updateSAPTICKET(sectorId, ticket.id, { summary: summaryToSave });
+            onTicketUpdated(); // Refresh list after successful save
+        } catch (error: any) {
+            console.error("Error saving SAP summary via callback:", error);
+            // Set specific error for summary saving failure
+            setUpdateError(`Erreur sauvegarde résumé: ${error.message}`);
+            // Re-throw the error so the hook knows saving failed
+            throw error;
+        }
+    }, [ticket, sectorId, onTicketUpdated]);
+
+    const handleSaveSolution = useCallback(async (solutionToSave: string) => {
+        if (!ticket || !sectorId) return;
+        console.log(`[TicketSAPDetails] Calling updateSAPTICKET to save SOLUTION for ticket ${ticket.id}`);
+        setUpdateError(null); // Clear previous update errors
+        try {
+            await updateSAPTICKET(sectorId, ticket.id, { solution: solutionToSave });
+            onTicketUpdated(); // Refresh list after successful save
+        } catch (error: any) {
+            console.error("Error saving SAP solution via callback:", error);
+            // Set specific error for solution saving failure
+            setUpdateError(`Erreur sauvegarde solution: ${error.message}`);
+            // Re-throw the error so the hook knows saving failed
+            throw error;
+        }
+    }, [ticket, sectorId, onTicketUpdated]);
+
 
     // --- Effects ---
 
-    // Initialize/Update status and trigger AI generation
+    // Initialize/Update status, reset AI hooks, and trigger AI generation
     useEffect(() => {
-        console.log("TicketSAPDetails Effect: Running for ticket:", ticket?.id);
+        console.log("[TicketSAPDetails Effect] Running for ticket:", ticket?.id);
+        // Reset AI hook states when ticket changes
+        resetSummaryHookState();
+        resetSolutionHookState();
+
         if (ticket) {
             setCurrentStatus(getInitialSAPStatus(ticket));
-            // Trigger AI generation only if needed
+
+            // Trigger AI generation ONLY if the prompt is not empty
+            // The hook will handle the cache check internally if called.
             if (summaryPrompt) {
-                console.log("TicketSAPDetails Effect: Triggering SUMMARY generation with prompt:", summaryPrompt);
-                triggerSummaryGeneration(summaryPrompt);
+                console.log("[TicketSAPDetails Effect] Triggering SUMMARY generation for ticket:", ticket.id);
+                triggerSummaryGeneration(ticket, summaryPrompt, handleSaveSummary);
             } else {
-                 console.log("TicketSAPDetails Effect: Skipping SUMMARY generation (prompt empty or summary exists).");
+                console.log("[TicketSAPDetails Effect] Skipping SUMMARY generation (prompt is empty - likely cached or no description).");
+                // If prompt is empty because it's cached, the hook reset should clear any previous state.
+                // If prompt is empty because description is empty, we don't want to generate.
             }
+
             if (solutionPrompt) {
-                console.log("TicketSAPDetails Effect: Triggering SOLUTION generation with prompt:", solutionPrompt);
-                triggerSolutionGeneration(solutionPrompt);
+                console.log("[TicketSAPDetails Effect] Triggering SOLUTION generation for ticket:", ticket.id);
+                triggerSolutionGeneration(ticket, solutionPrompt, handleSaveSolution);
             } else {
-                 console.log("TicketSAPDetails Effect: Skipping SOLUTION generation (prompt empty or solution exists).");
+                 console.log("[TicketSAPDetails Effect] Skipping SOLUTION generation (prompt is empty - likely cached or no description).");
             }
+
         } else {
-            console.log("TicketSAPDetails Effect: No ticket, resetting status.");
+            console.log("[TicketSAPDetails Effect] No ticket, resetting status.");
             setCurrentStatus('');
+            // Hooks already reset above
         }
-        // Clear errors when ticket changes
+
+        // Clear local component errors when ticket changes
         setStatusUpdateError(null);
         setCommentError(null);
-        setUpdateError(null);
+        setUpdateError(null); // Clear general update errors too
         setNewComment('');
-    }, [ticket, summaryPrompt, solutionPrompt, triggerSummaryGeneration, triggerSolutionGeneration]);
 
-    // Save generated summary to Firestore (or your backend)
-    useEffect(() => {
-        const saveSummary = async () => {
-            // Only save if summary was generated, exists, and wasn't already present
-            if (generatedSummary && ticket?.id && !ticket.summary) {
-                setUpdateError(null);
-                try {
-                    console.log(`Attempting to save generated SAP summary for ticket ${ticket.id} in sector ${sectorId}:`, generatedSummary);
-                    // Use the specific update function for SAP tickets
-                    await updateSAPTICKET(sectorId, ticket.id, { summary: generatedSummary });
-                    onTicketUpdated();
-                } catch (error: any) {
-                    console.error("Error saving SAP summary:", error);
-                    setUpdateError(`Erreur sauvegarde résumé SAP: ${error.message}`);
-                }
-            }
-        };
-        saveSummary();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [generatedSummary, sectorId, ticket?.id]); // Depend on generatedSummary, sectorId, and ticket ID
+    // Dependencies: ticket object itself, prompts, and the generation triggers + save callbacks
+    // Note: Callbacks (handleSaveSummary, handleSaveSolution) have their own dependencies defined via useCallback
+    }, [
+        ticket,
+        summaryPrompt,
+        solutionPrompt,
+        triggerSummaryGeneration,
+        triggerSolutionGeneration,
+        handleSaveSummary,
+        handleSaveSolution,
+        resetSummaryHookState,
+        resetSolutionHookState
+    ]);
 
-    // Save generated solution to Firestore (or your backend)
-    useEffect(() => {
-        const saveSolution = async () => {
-             // Only save if solution was generated, exists, and wasn't already present
-            if (generatedSolution && ticket?.id && !ticket.solution) {
-                setUpdateError(null);
-                try {
-                    console.log(`Attempting to save generated SAP solution for ticket ${ticket.id} in sector ${sectorId}:`, generatedSolution);
-                     // Use the specific update function for SAP tickets
-                    await updateSAPTICKET(sectorId, ticket.id, { solution: generatedSolution });
-                    onTicketUpdated();
-                } catch (error: any) {
-                    console.error("Error saving SAP solution:", error);
-                    setUpdateError(`Erreur sauvegarde solution SAP: ${error.message}`);
-                }
-            }
-        };
-        saveSolution();
-         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [generatedSolution, sectorId, ticket?.id]); // Depend on generatedSolution, sectorId, and ticket ID
+
+    // REMOVED the separate useEffect hooks for saving summary/solution.
+    // This is now handled by the callbacks passed to the useGeminiSummary hook.
+
 
     // --- Handlers ---
+
+    // Add a handler for the main close action to also reset AI states
+    const handleClose = () => {
+        resetSummaryHookState();
+        resetSolutionHookState();
+        onClose(); // Call the original onClose handler
+    };
 
     const handleAddComment = async () => {
         if (newComment.trim() && sectorId && ticket?.id) {
@@ -195,9 +240,15 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
         return null;
     }
 
-    // Determine what to display (existing or newly generated)
+    // Determine what to display: Prioritize direct cache from ticket prop, fallback to hook state
     const displaySummary = ticket?.summary || generatedSummary;
     const displaySolution = ticket?.solution || generatedSolution;
+
+    // --- Diagnostic Log ---
+    console.log("[TicketSAPDetails Render] Received Ticket Prop:", JSON.stringify(ticket, null, 2)); // Log the whole ticket object received
+    console.log("[TicketSAPDetails Render] Calculated displaySummary:", displaySummary);
+    console.log("[TicketSAPDetails Render] Calculated displaySolution:", displaySolution);
+    // --- End Diagnostic Log ---
 
     // --- Portal Logic ---
     // Need to ensure this only runs client-side where document is available
@@ -209,12 +260,14 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
     // The actual modal JSX
     const modalContent = (
         // Outer container: Fixed position, full screen, z-index, flex center
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70">
+        // Add onClick={handleClose} to the outer div for click-outside-to-close behavior
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-70" onClick={handleClose}>
             {/* Modal Content Box: Max width, relative positioning, background, text color, rounded */}
-            <div className="w-11/12 max-w-3xl relative bg-jdc-card text-jdc-white rounded-lg shadow-xl max-h-[90vh] overflow-y-auto p-6"> {/* Added padding */}
+            {/* Add onClick={(e) => e.stopPropagation()} to prevent closing when clicking inside */}
+            <div className="w-11/12 max-w-3xl relative bg-jdc-card text-jdc-white rounded-lg shadow-xl max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
                 {/* Close Button: Absolute positioning top-right */}
                 <button
-                    onClick={onClose} // Keep existing close handler
+                    onClick={handleClose} // Use the new close handler
                     className="btn btn-sm btn-circle btn-ghost absolute right-2 top-2 z-10"
                     aria-label="Fermer"
                 >
@@ -245,18 +298,19 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
                     <div className="flex items-center gap-2">
                         <select
                             id="sap-ticket-status-select"
-                            className="select select-bordered select-sm w-full max-w-xs bg-jdc-gray"
+                            // Ensure dark background and light text, overriding potential defaults
+                            className="select select-bordered select-sm w-full max-w-xs bg-jdc-gray text-jdc-white"
                             value={currentStatus}
                             onChange={(e) => setCurrentStatus(e.target.value)}
                             disabled={isUpdatingStatus}
                         >
-                            {/* Add relevant SAP status options here */}
-                            <option value="Nouveau">Nouveau</option>
-                            <option value="En cours">En cours</option>
-                            <option value="En attente client">En attente client</option>
-                            <option value="Résolu">Résolu</option>
-                            <option value="Terminé">Terminé</option>
-                            <option value="Annulé">Annulé</option>
+                            {/* Add text color class directly to options for better contrast in dropdown */}
+                            <option className="text-black" value="Nouveau">Nouveau</option>
+                            <option className="text-black" value="En cours">En cours</option>
+                            <option className="text-black" value="En attente client">En attente client</option>
+                            <option className="text-black" value="Résolu">Résolu</option>
+                            <option className="text-black" value="Terminé">Terminé</option>
+                            <option className="text-black" value="Annulé">Annulé</option>
                         </select>
                         <button
                             className="btn btn-primary btn-sm"
@@ -275,28 +329,38 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
                     {/* AI Summary */}
                     <div>
-                        <h4 className="text-md font-semibold mb-1 text-blue-300">Résumé IA</h4>
+                        <h4 className="text-md font-semibold mb-1 text-blue-300">
+                            Résumé IA {isSummaryCached && <span className="text-xs font-normal text-gray-400">(cache)</span>}
+                        </h4>
                         {isSummaryLoading && <span className="loading loading-dots loading-sm"></span>}
-                        {summaryError && !displaySummary && <p className="text-error text-xs">Erreur résumé: {summaryError}</p>}
+                        {/* Display error from hook OR the specific update error */}
+                        {(summaryError || (updateError && updateError.includes("résumé"))) && !displaySummary && (
+                            <p className="text-error text-xs">Erreur: {summaryError || updateError}</p>
+                        )}
                         {displaySummary ? (
                             <div className="prose prose-sm max-w-none text-gray-300"><ReactMarkdown>{displaySummary}</ReactMarkdown></div>
-                        ) : !isSummaryLoading && !summaryError ? (
-                            <p className="text-xs text-gray-500 italic">Aucun résumé généré.</p>
+                        ) : !isSummaryLoading && !summaryError && !(updateError && updateError.includes("résumé")) ? (
+                            <p className="text-xs text-gray-500 italic">Aucun résumé.</p> // Simplified empty state
                         ) : null}
-                        {updateError && updateError.includes("résumé") && <p className="text-error text-xs mt-1">{updateError}</p>}
+                        {/* Removed redundant updateError display here, handled above */}
                     </div>
 
                     {/* AI Solution */}
                     <div>
-                        <h4 className="text-md font-semibold mb-1 text-green-300">Solution Proposée IA</h4>
+                         <h4 className="text-md font-semibold mb-1 text-green-300">
+                            Solution Proposée IA {isSolutionCached && <span className="text-xs font-normal text-gray-400">(cache)</span>}
+                        </h4>
                         {isSolutionLoading && <span className="loading loading-dots loading-sm"></span>}
-                        {solutionError && !displaySolution && <p className="text-error text-xs">Erreur solution: {solutionError}</p>}
+                         {/* Display error from hook OR the specific update error */}
+                        {(solutionError || (updateError && updateError.includes("solution"))) && !displaySolution && (
+                            <p className="text-error text-xs">Erreur: {solutionError || updateError}</p>
+                        )}
                         {displaySolution ? (
                             <div className="prose prose-sm max-w-none text-gray-300"><ReactMarkdown>{displaySolution}</ReactMarkdown></div>
-                        ) : !isSolutionLoading && !solutionError ? (
-                            <p className="text-xs text-gray-500 italic">Aucune solution générée.</p>
+                        ) : !isSolutionLoading && !solutionError && !(updateError && updateError.includes("solution")) ? (
+                             <p className="text-xs text-gray-500 italic">Aucune solution.</p> // Simplified empty state
                         ) : null}
-                        {updateError && updateError.includes("solution") && <p className="text-error text-xs mt-1">{updateError}</p>}
+                         {/* Removed redundant updateError display here, handled above */}
                     </div>
                 </div>
                 <hr className="my-3 border-gray-700"/>
@@ -305,8 +369,8 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
                 <details className="mb-3 text-sm">
                     <summary className="cursor-pointer font-medium text-gray-400 hover:text-jdc-white">Voir la description du problème SAP</summary>
                     <div className="mt-2 p-3 border border-gray-600 rounded bg-jdc-gray text-xs max-h-32 overflow-y-auto">
-                        {/* Using 'descriptionProbleme' or fallback to 'description' */}
-                        <pre className="whitespace-pre-wrap break-words font-mono">{ticket.descriptionProbleme || ticket.description || 'N/A'}</pre>
+                        {/* Displaying demandeSAP primarily, then fallbacks */}
+                        <pre className="whitespace-pre-wrap break-words font-mono">{ticket.demandeSAP || ticket.descriptionProbleme || ticket.description || 'N/A'}</pre>
                     </div>
                 </details>
                 <hr className="my-3 border-gray-700"/>
@@ -342,14 +406,8 @@ const TicketSAPDetails: React.FC<TicketSAPDetailsProps> = ({ ticket, onClose, se
                 </div>
                 {/* Removed modal-box specific padding/margins if any, handled by the container */}
             </div>
-            {/* Click outside to close - Handled by the outer fixed container click (optional, can be added) */}
-            {/* We can add an onClick handler to the outer div if needed:
-               <div className="fixed inset-0 z-50 ... " onClick={onClose}>
-                 <div className="w-11/12 max-w-3xl ... " onClick={(e) => e.stopPropagation()}> // Prevent closing when clicking inside the box
-                   ... content ...
-                 </div>
-               </div>
-            */}
+            {/* Click outside to close is now handled by the outer div's onClick={handleClose} */}
+            {/* Clicking inside the modal content box is prevented by its onClick={(e) => e.stopPropagation()} */}
         </div>
     );
 

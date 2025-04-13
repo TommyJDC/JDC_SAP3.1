@@ -20,9 +20,14 @@ import {
   type DocumentData,
   type SetOptions,
   Timestamp,
+  startAt, // Added for search
+  endAt,   // Added for search
+  arrayUnion, // Added for updating image URLs array
+  arrayRemove, // Added for removing image URLs
 } from 'firebase/firestore';
-import { db } from '~/firebase.config';
-import type { UserProfile, SapTicket, Shipment, GeocodeCacheEntry, StatsSnapshot } from '~/types/firestore.types';
+// Firebase Storage n'est plus nécessaire ici
+import { db } from '~/firebase.config'; // Importer seulement db
+import type { UserProfile, SapTicket, Shipment, GeocodeCacheEntry, StatsSnapshot, Article } from '~/types/firestore.types'; // Added Article
 // Import the date parsing utility
 import { parseFrenchDate } from '~/utils/dateUtils';
 
@@ -66,6 +71,174 @@ export const getUserProfileSdk = async (uid: string): Promise<UserProfile | null
   } catch (error) {
     console.error("Error fetching user profile:", error);
     throw new Error("Impossible de récupérer le profil utilisateur.");
+  }
+};
+
+
+// --- Article Image Functions ---
+
+/**
+ * Adds a new image URL (provenant de Cloudinary ou autre) to the 'imageUrls' array
+ * of an article document in Firestore.
+ * Uses arrayUnion to avoid duplicates and overwriting existing URLs.
+ * @param articleId The ID of the article document.
+ * @param imageUrl The new image URL to add.
+ * @returns A promise resolving when the update is complete.
+ */
+export const addArticleImageUrl = async (articleId: string, imageUrl: string): Promise<void> => {
+  if (!articleId || !imageUrl) {
+    throw new Error("Article ID and image URL are required.");
+  }
+  console.log(`[FirestoreService] Adding image URL to article ${articleId}...`);
+  try {
+    const articleDocRef = doc(db, 'articles', articleId);
+    await updateDoc(articleDocRef, {
+      imageUrls: arrayUnion(imageUrl) // Atomically add the new URL to the array
+    });
+    console.log(`[FirestoreService] Image URL successfully added to article ${articleId}.`);
+  } catch (error: any) {
+    console.error(`[FirestoreService] Error adding image URL to article ${articleId}:`, error);
+     if (error.code === 'permission-denied') {
+        throw new Error("Permission refusée pour mettre à jour l'article. Vérifiez les règles de sécurité Firestore.");
+    } else if (error.code === 'not-found') {
+        throw new Error(`L'article avec l'ID ${articleId} n'a pas été trouvé.`);
+    }
+    throw new Error(`Impossible d'ajouter l'URL de l'image à l'article : ${error.message || error.code}`);
+  }
+};
+
+/**
+ * Removes a specific image URL from the 'imageUrls' array of an article document in Firestore.
+ * Uses arrayRemove.
+ * @param articleId The ID of the article document.
+ * @param imageUrl The image URL to remove.
+ * @returns A promise resolving when the update is complete.
+ */
+export const deleteArticleImageUrl = async (articleId: string, imageUrl: string): Promise<void> => {
+  if (!articleId || !imageUrl) {
+    throw new Error("Article ID and image URL are required for deletion.");
+  }
+  console.log(`[FirestoreService] Removing image URL from article ${articleId}...`);
+  try {
+    const articleDocRef = doc(db, 'articles', articleId);
+    await updateDoc(articleDocRef, {
+      imageUrls: arrayRemove(imageUrl) // Atomically remove the URL from the array
+    });
+    console.log(`[FirestoreService] Image URL successfully removed from article ${articleId}.`);
+  } catch (error: any) {
+    console.error(`[FirestoreService] Error removing image URL from article ${articleId}:`, error);
+     if (error.code === 'permission-denied') {
+        throw new Error("Permission refusée pour mettre à jour l'article. Vérifiez les règles de sécurité Firestore.");
+    } else if (error.code === 'not-found') {
+        throw new Error(`L'article avec l'ID ${articleId} n'a pas été trouvé.`);
+    }
+    throw new Error(`Impossible de supprimer l'URL de l'image de l'article : ${error.message || error.code}`);
+  }
+};
+
+
+// --- Article Search Functions ---
+
+/**
+ * Searches for articles based on code and/or name criteria.
+ * - Code search is exact match (case-sensitive).
+ * - Name search is prefix match on 'Désignation' (case-insensitive, assumes 'Désignation' is uppercase).
+ *
+ * @param criteria An object containing optional 'code' and 'nom' search terms.
+ * @param criteria.code The exact article code to search for.
+ * @param criteria.nom The partial or full article name (designation) to search for.
+ * @returns A promise resolving to an array of unique Article objects matching the criteria.
+ */
+export const searchArticles = async (criteria: { code?: string; nom?: string }): Promise<Article[]> => {
+  const { code, nom } = criteria;
+  const trimmedCode = code?.trim();
+  const trimmedNom = nom?.trim();
+  const nomUppercase = trimmedNom?.toUpperCase(); // Convert search name to uppercase
+
+  console.log(`[FirestoreService] Searching articles with criteria:`, { code: trimmedCode, nom: trimmedNom });
+
+  // If no criteria provided, return empty array
+  if (!trimmedCode && !trimmedNom) {
+    console.log("[FirestoreService] No search criteria provided for articles.");
+    return [];
+  }
+
+  const articlesCollection = collection(db, 'articles');
+  const resultsMap = new Map<string, Article>(); // Use Map for unique results by ID
+
+  try {
+    // --- Query 1: Exact Match on Code (if provided) ---
+    if (trimmedCode) {
+      const codeQuery = query(articlesCollection, where("Code", "==", trimmedCode));
+      console.log(`[FirestoreService] Executing Code exact match query for: "${trimmedCode}"`);
+      const codeSnapshot = await getDocs(codeQuery);
+      console.log(`[FirestoreService] Code query found ${codeSnapshot.docs.length} matches.`);
+      codeSnapshot.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        // Basic validation
+        if (data.Code && data.Désignation) {
+          const article: Article = {
+            id: docSnap.id,
+            Code: data.Code,
+            Désignation: data.Désignation,
+            ...data // Include other potential fields
+          } as Article;
+          resultsMap.set(docSnap.id, article);
+        } else {
+           console.warn(`[FirestoreService] Document ${docSnap.id} matched by Code is missing 'Code' or 'Désignation'.`);
+        }
+      });
+    }
+
+    // --- Query 2: Prefix Match on Désignation (if provided) ---
+    // Note: This assumes 'Désignation' field exists and is indexed in Firestore.
+    if (nomUppercase) {
+      // Requires Firestore index on 'Désignation' (ascending)
+      const endTerm = nomUppercase + '\uf8ff'; // \uf8ff is a very high code point for prefix matching
+      const designationQuery = query(
+        articlesCollection,
+        orderBy("Désignation"), // MUST order by the field being queried
+        startAt(nomUppercase),
+        endAt(endTerm)
+        // limit(20) // Optional: Limit results for performance
+      );
+
+      console.log(`[FirestoreService] Executing Désignation prefix query (uppercase) for: "${nomUppercase}"`);
+      const designationSnapshot = await getDocs(designationQuery);
+      console.log(`[FirestoreService] Désignation query found ${designationSnapshot.docs.length} potential matches.`);
+
+      designationSnapshot.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        // Basic validation
+        if (data.Code && data.Désignation) {
+          const article: Article = {
+            id: docSnap.id,
+            Code: data.Code,
+            Désignation: data.Désignation,
+            ...data // Include other potential fields
+          } as Article;
+          // Add to map (will overwrite if already found by code, which is fine)
+          resultsMap.set(docSnap.id, article);
+        } else {
+          console.warn(`[FirestoreService] Document ${docSnap.id} matched by Désignation is missing 'Code' or 'Désignation'.`);
+        }
+      });
+    }
+
+    // --- Combine Results ---
+    const combinedResults = Array.from(resultsMap.values());
+
+    console.log(`[FirestoreService] Article search completed. Found ${combinedResults.length} unique articles.`);
+    return combinedResults;
+
+  } catch (error: any) {
+    console.error("[FirestoreService] Error executing article search:", error);
+    // Check for specific Firestore errors, e.g., missing index
+    if (error.code === 'failed-precondition' && error.message?.includes('index')) {
+        console.error("[FirestoreService] Firestore Error: Likely missing a composite index. Check the Firestore console error message for a link to create it. You'll likely need an index on 'Désignation' (ascending).");
+        throw new Error("Erreur Firestore: Index manquant requis pour la recherche par nom (sur 'Désignation'). Vérifiez la console Firebase.");
+    }
+    throw new Error("Échec de la recherche d'articles."); // Throw a generic error
   }
 };
 

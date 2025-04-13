@@ -14,10 +14,11 @@ export default {
           800: '#333333', // Gris foncé pour fond alternatif/texte
         },
         'jdc-blue-dark': '#0a0f1f', // Très foncé, pour le fond principal
+        'jdc-white': '#FFFFFF', // Blanc standard pour texte sur fond sombre
       },
       fontFamily: {
         sans: [
-          '"Poppins"', // Police principale
+          '"Roboto"', // Nouvelle police principale
           "ui-sans-serif",
           "system-ui",
           "sans-serif",

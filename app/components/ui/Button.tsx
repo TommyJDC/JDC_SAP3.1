@@ -16,7 +16,8 @@ interface ButtonBaseProps {
 }
 
 // Props for a standard button element
-interface ButtonElementProps extends ButtonBaseProps, React.ButtonHTMLAttributes<HTMLButtonElement> {
+// Omit 'children' from ButtonHTMLAttributes to resolve conflict with ButtonBaseProps
+interface ButtonElementProps extends ButtonBaseProps, Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   as?: 'button';
   to?: never; // Ensure 'to' is not passed for 'button'
 }
@@ -29,7 +30,8 @@ interface LinkElementProps extends ButtonBaseProps, Omit<LinkProps, 'children' |
 
 type ButtonProps = ButtonElementProps | LinkElementProps;
 
-const baseStyles = "inline-flex items-center justify-center font-semibold rounded focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-jdc-black transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed";
+// Added active:scale-95 and transition-transform for click animation
+const baseStyles = "inline-flex items-center justify-center font-semibold rounded focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-jdc-black transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed transition-transform duration-100 ease-in-out active:scale-95";
 
 const variantStyles: Record<ButtonVariant, string> = {
   primary: "bg-jdc-yellow text-jdc-black hover:bg-yellow-300 focus:ring-jdc-yellow",
