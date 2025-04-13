@@ -1,4 +1,15 @@
+# Dependencies
 node_modules
+
+# Build files
+build
+
+# Environment files
+sap-jdc-*.json
+.env
+
+# IDE
+.vscode
 
 # Local Netlify folder
 .netlify
