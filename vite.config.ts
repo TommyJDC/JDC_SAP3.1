@@ -12,7 +12,8 @@ export default defineConfig({
   },
   ssr: {
     target: 'node',
-    // Mark axios and potentially problematic GCP packages as external
-    external: ['axios', '@google-cloud/storage', 'google-gax'],
+    // Force include axios in the server bundle, keep GCP external
+    noExternal: ['axios'],
+    external: ['@google-cloud/storage', 'google-gax'],
   }
 });
