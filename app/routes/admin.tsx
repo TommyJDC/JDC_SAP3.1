@@ -8,7 +8,7 @@ import { EditUserModal } from '~/components/EditUserModal';
 import {
   getAllUserProfilesSdk,
   updateUserProfileSdk
-} from '~/services/firestore.service';
+} from '~/services/firestore.service.server';
 // Removed signUpAndCreateProfile import from auth.service
 import { useToast } from '~/context/ToastContext';
 

@@ -27,7 +27,7 @@ import {
   getTotalTicketCountSdk,
   getDistinctClientCountFromEnvoiSdk,
   getLatestStatsSnapshotsSdk,
-} from "~/services/firestore.service";
+} from "~/services/firestore.service.server";
 
 
 export const meta: MetaFunction = () => {

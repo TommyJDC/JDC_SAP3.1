@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'; // Add
 import ReactDOM from 'react-dom'; // Import ReactDOM for createPortal
 // Use ~ alias for imports relative to the app root
 import useGeminiSummary from '~/hooks/useGeminiSummary';
-import { updateSAPTICKET } from '~/services/firestore.service'; // Already imported
+import { updateSAPTICKET } from '~/services/firestore.service.server'; // Already imported
 import ReactMarkdown from 'react-markdown';
 import { FaSpinner } from 'react-icons/fa';
 import type { SapTicket } from '~/types/firestore.types'; // Import the central type

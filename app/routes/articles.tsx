@@ -3,7 +3,7 @@ import { json } from "@remix-run/node";
 import { Form, useLoaderData, useSearchParams, useRevalidator } from "@remix-run/react"; // Importer useRevalidator
 import { useState, useEffect } from "react";
 // Importer searchArticles, addArticleImageUrl, et deleteArticleImageUrl
-import { searchArticles, addArticleImageUrl, deleteArticleImageUrl } from "~/services/firestore.service";
+import { searchArticles, addArticleImageUrl, deleteArticleImageUrl } from "~/services/firestore.service.server";
 import type { Article, AppUser, UserProfile } from "~/types/firestore.types";
 import { useOutletContext } from "@remix-run/react";
 import { useRef } from "react"; // Importer useRef pour l'input fichier caché

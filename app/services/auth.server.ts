@@ -1,7 +1,7 @@
 import { Authenticator } from "remix-auth";
 import { GoogleStrategy } from "remix-auth-google";
 import { sessionStorage, type UserSession } from "./session.server"; // Import session storage and type
-import { getUserProfileSdk, createUserProfileSdk } from "./firestore.service"; // Import Firestore functions
+import { getUserProfileSdk, createUserProfileSdk } from "./firestore.service.server"; // Import Firestore functions
 
 // Create an instance of the authenticator, pass a generic with what
 // strategies will return and will be stored in the session

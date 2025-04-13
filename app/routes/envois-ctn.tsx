@@ -1,7 +1,7 @@
 import type { MetaFunction } from "@remix-run/node";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useOutletContext, useSearchParams } from "@remix-run/react"; // Import useSearchParams
-import { getAllShipments, getUserProfileSdk, deleteShipmentSdk } from "~/services/firestore.service";
+import { getAllShipments, getUserProfileSdk, deleteShipmentSdk } from "~/services/firestore.service.server";
 import type { Shipment, UserProfile, AppUser } from "~/types/firestore.types";
 import { Input } from "~/components/ui/Input";
 import { Button } from "~/components/ui/Button";

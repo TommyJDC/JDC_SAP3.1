@@ -11,7 +11,7 @@ import {
   type AuthError
 } from "firebase/auth";
 import { auth } from "~/firebase.config"; // Use the initialized auth instance
-import { createUserProfileSdk, getUserProfileSdk } from "./firestore.service"; // Import profile creation AND fetching
+import { createUserProfileSdk, getUserProfileSdk } from "./firestore.service.server"; // Import profile creation AND fetching
 import type { UserProfile } from "~/types/firestore.types"; // Import UserProfile type
 
 // Define a simpler User type for our app state

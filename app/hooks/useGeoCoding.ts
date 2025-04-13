@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import axios from 'axios';
-import { getGeocodeFromCache, saveGeocodeToCache } from '~/services/firestore.service';
+import { getGeocodeFromCache, saveGeocodeToCache } from '~/services/firestore.service.server';
 import type { GeocodeCacheEntry } from '~/types/firestore.types';
 
 // API response interfaces
@@ -121,7 +121,7 @@ const useGeoCoding = (addresses: string[]): UseGeoCodingResult => {
         } catch (err: any) {
           if (axios.isCancel(err) || (err.message && err.message.includes('aborted'))) {
              console.log(`[useGeoCoding] Geocode request aborted for "${addr}"`);
-             return [normalizedAddr, undefined]; // Indicate aborted
+             return [normalizedAddr, null]; // Return null for aborted requests, matching Coordinates type
           }
           console.error(`[useGeoCoding] Error geocoding address "${addr}":`, err);
           let errorMessage = 'Erreur de géocodage';

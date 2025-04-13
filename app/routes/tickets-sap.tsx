@@ -2,7 +2,7 @@ import type { MetaFunction } from "@remix-run/node";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useOutletContext } from "@remix-run/react";
 // Import getAllTicketsForSectorsSdk instead of the listener
-import { getUserProfileSdk, getAllTicketsForSectorsSdk } from "~/services/firestore.service";
+import { getUserProfileSdk, getAllTicketsForSectorsSdk } from "~/services/firestore.service.server";
 // Import UserSession from session.server instead of AppUser
 import type { SapTicket, UserProfile } from "~/types/firestore.types";
 import type { UserSession } from "~/services/session.server"; // Import UserSession

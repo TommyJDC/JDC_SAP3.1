@@ -4,7 +4,7 @@ import { Timestamp, FieldValue } from 'firebase-admin/firestore';
 import type { UserProfile, SapTicket, Shipment, GeocodeCacheEntry, StatsSnapshot, Article } from '~/types/firestore.types';
 import { parseFrenchDate } from '~/utils/dateUtils';
 // Import the initialized admin db instance
-import { dbAdmin } from '~/firebase.admin.config'; // Import the configured instance
+import { dbAdmin } from '~/firebase.admin.config.server'; // Import the configured instance
 import type * as admin from 'firebase-admin'; // Import admin types if needed elsewhere
 
 
