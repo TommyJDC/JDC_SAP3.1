@@ -10,5 +10,9 @@ export default defineConfig({
   build: {
     target: 'es2020', // Keep build target
   },
-  // Removed ssr config block
+  ssr: {
+    target: 'node',
+    // Mark axios and potentially problematic GCP packages as external
+    external: ['axios', '@google-cloud/storage', 'google-gax'],
+  }
 });
