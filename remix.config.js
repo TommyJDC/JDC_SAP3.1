@@ -2,5 +2,5 @@
 export default {
   ignoredRouteFiles: ["**/.*", "netlify/**"], // Ignore the netlify functions directory
   serverBuildTarget: "netlify",
-  // server: "./server.js", // Remove this line - Netlify adapter provides its own entry point
+  server: "./netlify/functions/server.js", // Add server entry point as per new instructions
 };
