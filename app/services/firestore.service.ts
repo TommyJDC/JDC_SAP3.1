@@ -23,6 +23,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '~/firebase.config';
 import type { UserProfile, SapTicket, Shipment, GeocodeCacheEntry, StatsSnapshot } from '~/types/firestore.types';
+// Import the date parsing utility
+import { parseFrenchDate } from '~/utils/dateUtils';
 
 // --- Helper for Status Correction ---
 const correctTicketStatus = (ticketData: DocumentData): { correctedStatus: string | null, needsUpdate: boolean } => {
@@ -123,6 +125,36 @@ export const updateUserProfileSdk = async (uid: string, data: Partial<UserProfil
 // --- SAP Ticket Functions ---
 
 /**
+ * Updates a specific SAP ticket document within its sector collection.
+ * @param sectorId The ID of the sector (collection name).
+ * @param ticketId The ID of the ticket document to update.
+ * @param data An object containing the fields to update.
+ */
+export const updateSAPTICKET = async (sectorId: string, ticketId: string, data: Partial<Omit<SapTicket, 'id' | 'secteur'>>): Promise<void> => {
+  if (!sectorId || !ticketId || !data || Object.keys(data).length === 0) {
+    console.warn("updateSAPTICKET called with invalid sectorId, ticketId, or empty data.");
+    throw new Error("Identifiants de secteur/ticket ou données de mise à jour manquants.");
+  }
+  console.log(`[FirestoreService] Attempting to update ticket ${ticketId} in sector ${sectorId} with data:`, data);
+  try {
+    // Construct the document reference using the sectorId as the collection name
+    const ticketDocRef = doc(db, sectorId, ticketId);
+    await updateDoc(ticketDocRef, data);
+    console.log(`[FirestoreService] Successfully updated ticket ${ticketId} in sector ${sectorId}.`);
+  } catch (error: any) {
+    console.error(`[FirestoreService] Error updating ticket ${ticketId} in sector ${sectorId}:`, error);
+    if (error.code === 'permission-denied') {
+      console.error(`[FirestoreService] CRITICAL: Firestore permission denied for update operation on collection '${sectorId}'. Check security rules.`);
+      throw new Error(`Permission refusée par Firestore pour la mise à jour dans le secteur ${sectorId}. Vérifiez les règles de sécurité.`);
+    } else if (error.code === 'not-found') {
+        console.error(`[FirestoreService] Error: Document ${ticketId} not found in collection ${sectorId}.`);
+        throw new Error(`Le ticket ${ticketId} n'a pas été trouvé dans le secteur ${sectorId}.`);
+    }
+    throw new Error(`Impossible de mettre à jour le ticket SAP ${ticketId}. Cause: ${error.message || error}`);
+  }
+};
+
+/**
  * Fetches the most recent SAP tickets for the given sectors (one-time fetch).
  * Applies status correction logic to the returned data but DOES NOT update Firestore.
  */
@@ -139,20 +171,20 @@ export const getRecentTicketsForSectors = async (sectors: string[], count: numbe
         limit(count) // Limit per sector
       );
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => {
-         const data = doc.data();
-         // Ensure date is a JS Date object
-         const date = data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date) : new Date(0));
-         // Apply status correction logic to the data being returned
-         const { correctedStatus } = correctTicketStatus(data);
-         return {
+       return querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          // Use parseFrenchDate to handle various date formats and invalid values
+          const parsedDate = parseFrenchDate(data.date);
+          // Apply status correction logic to the data being returned
+          const { correctedStatus } = correctTicketStatus(data);
+          return {
            id: doc.id,
            ...data,
-           statut: correctedStatus ?? data.statut, // Use corrected status if available
-           secteur: sector, // Add sector info
-           date: date
-         } as SapTicket;
-      });
+            statut: correctedStatus ?? data.statut, // Use corrected status if available
+            secteur: sector, // Add sector info
+            date: parsedDate // Store the parsed Date object or null
+          } as SapTicket;
+       });
     } catch (error) {
       console.error(`Error fetching tickets for sector ${sector}:`, error);
       return []; // Return empty array for this sector on error
@@ -160,11 +192,18 @@ export const getRecentTicketsForSectors = async (sectors: string[], count: numbe
   });
 
   try {
-    const resultsBySector = await Promise.all(ticketPromises);
-    const allTickets = resultsBySector.flat();
-    // Sort all collected tickets by date descending
-    allTickets.sort((a, b) => b.date.getTime() - a.date.getTime());
-    console.log(`[FirestoreService] Found ${allTickets.length} tickets across sectors, returning top ${count}`);
+     const resultsBySector = await Promise.all(ticketPromises);
+     const allTickets = resultsBySector.flat();
+     // Sort all collected tickets by the parsed date descending, handling nulls
+     allTickets.sort((a, b) => {
+         // a.date and b.date are Date | null here
+         // Handle null dates during sort
+         if (!(b.date instanceof Date)) return -1; // B is null/invalid, A comes first (descending)
+         if (!(a.date instanceof Date)) return 1;  // A is null/invalid, B comes first (descending)
+         // Both are valid Date objects here, safe to call getTime()
+         return b.date.getTime() - a.date.getTime();
+     });
+     console.log(`[FirestoreService] Found ${allTickets.length} tickets across sectors, returning top ${count}`);
     return allTickets.slice(0, count); // Return only the most recent 'count' tickets overall
   } catch (error) {
     console.error("Error merging ticket results:", error);
@@ -189,20 +228,20 @@ export const getAllTicketsForSectorsSdk = async (sectors: string[]): Promise<Sap
       const q = query(sectorCollectionRef, orderBy('date', 'desc'));
       const querySnapshot = await getDocs(q);
       console.log(`[FirestoreService] Fetched ${querySnapshot.size} tickets for sector ${sector}.`);
-      return querySnapshot.docs.map(doc => {
-         const data = doc.data();
-         // Ensure date is a JS Date object
-         const date = data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date) : new Date(0));
-         // Apply status correction logic to the data being returned
-         const { correctedStatus } = correctTicketStatus(data);
-         return {
+       return querySnapshot.docs.map(doc => {
+          const data = doc.data();
+          // Use parseFrenchDate to handle various date formats and invalid values
+          const parsedDate = parseFrenchDate(data.date);
+          // Apply status correction logic to the data being returned
+          const { correctedStatus } = correctTicketStatus(data);
+          return {
            id: doc.id,
            ...data,
-           statut: correctedStatus ?? data.statut, // Use corrected status if available
-           secteur: sector, // Add sector info
-           date: date
-         } as SapTicket;
-      });
+            statut: correctedStatus ?? data.statut, // Use corrected status if available
+            secteur: sector, // Add sector info
+            date: parsedDate // Store the parsed Date object or null
+          } as SapTicket;
+       });
     } catch (error) {
       console.error(`Error fetching ALL tickets for sector ${sector}:`, error);
       return [];
@@ -210,10 +249,18 @@ export const getAllTicketsForSectorsSdk = async (sectors: string[]): Promise<Sap
   });
 
   try {
-    const resultsBySector = await Promise.all(ticketPromises);
-    const allTickets = resultsBySector.flat();
-    allTickets.sort((a, b) => b.date.getTime() - a.date.getTime());
-    console.log(`[FirestoreService] Fetched a total of ${allTickets.length} tickets across all specified sectors.`);
+     const resultsBySector = await Promise.all(ticketPromises);
+     const allTickets = resultsBySector.flat();
+     // Sort all collected tickets by the parsed date descending, handling nulls
+     allTickets.sort((a, b) => {
+         // a.date and b.date are Date | null here
+         // Handle null dates during sort
+         if (!(b.date instanceof Date)) return -1; // B is null/invalid, A comes first (descending)
+         if (!(a.date instanceof Date)) return 1;  // A is null/invalid, B comes first (descending)
+         // Both are valid Date objects here, safe to call getTime()
+         return b.date.getTime() - a.date.getTime();
+     });
+     console.log(`[FirestoreService] Fetched a total of ${allTickets.length} tickets across all specified sectors.`);
     return allTickets;
   } catch (error) {
     console.error("Error merging ALL ticket results:", error);
@@ -264,20 +311,21 @@ export const listenToAllTicketsForSectorsSdk = (
             if (change.type === "removed") {
                 allTicketsMap.delete(ticketId);
                 console.log(`[FirestoreService] Ticket removed: ${ticketId} from sector ${sector}`);
-            } else { // 'added' or 'modified'
-                const data = docSnap.data();
-                const date = data.date instanceof Timestamp ? data.date.toDate() : (data.date ? new Date(data.date) : new Date(0));
-                const { correctedStatus, needsUpdate } = correctTicketStatus(data);
+             } else { // 'added' or 'modified'
+                 const data = docSnap.data();
+                 // Use parseFrenchDate here as well
+                 const parsedDate = parseFrenchDate(data.date);
+                 const { correctedStatus, needsUpdate } = correctTicketStatus(data);
 
-                const ticket: SapTicket = {
+                 const ticket: SapTicket = {
                     id: ticketId,
                     ...data,
-                    statut: correctedStatus ?? data.statut, // Use corrected status for UI immediately
-                    secteur: sector,
-                    date: date,
-                } as SapTicket;
+                     statut: correctedStatus ?? data.statut, // Use corrected status for UI immediately
+                     secteur: sector,
+                     date: parsedDate, // Store the parsed Date or null
+                 } as SapTicket;
 
-                allTicketsMap.set(ticketId, ticket); // Add or update in the map
+                 allTicketsMap.set(ticketId, ticket); // Add or update in the map
 
                 // If status correction is needed, plan a background update
                 if (needsUpdate && correctedStatus !== null) {
@@ -296,10 +344,17 @@ export const listenToAllTicketsForSectorsSdk = (
         // Convert map values to array, sort, and call the main callback
         const currentAllTickets = Array.from(allTicketsMap.values());
         // Filter out tickets without raisonSociale before calling back
-        const ticketsWithRaisonSociale = currentAllTickets.filter(t => t.raisonSociale);
-        ticketsWithRaisonSociale.sort((a, b) => b.date.getTime() - a.date.getTime()); // Sort by date descending
-        callback(ticketsWithRaisonSociale);
-
+         const ticketsWithRaisonSociale = currentAllTickets.filter(t => t.raisonSociale);
+         // Sort by the parsed date descending, handling nulls
+         ticketsWithRaisonSociale.sort((a, b) => {
+             // a.date and b.date are Date | null here
+             // Handle null dates during sort
+             if (!(b.date instanceof Date)) return -1; // B is null/invalid, A comes first (descending)
+             if (!(a.date instanceof Date)) return 1;  // A is null/invalid, B comes first (descending)
+             // Both are valid Date objects here, safe to call getTime()
+             return b.date.getTime() - a.date.getTime();
+         });
+         callback(ticketsWithRaisonSociale);
 
         // Execute background updates if any were planned for this snapshot
         if (updatePromises.length > 0) {
@@ -438,34 +493,63 @@ export const getAllShipments = async (userProfile: UserProfile | null): Promise<
 
 
 export const getRecentShipmentsForSectors = async (sectors: string[], count: number = 5): Promise<Shipment[]> => {
-  if (!sectors || sectors.length === 0) {
-      console.log("[FirestoreService] getRecentShipmentsForSectors: No sectors provided, returning [].");
-      return [];
+  // Determine if we are fetching for specific sectors or all (admin case)
+  const fetchAllSectors = !sectors || sectors.length === 0;
+
+  if (fetchAllSectors) {
+    console.log(`[FirestoreService] Fetching ${count} recent shipments across ALL sectors (Admin view).`);
+  } else {
+    console.log(`[FirestoreService] Fetching ${count} recent shipments for sectors: ${sectors.join(', ')}`);
   }
-  console.log(`[FirestoreService] Fetching recent shipments for sectors: ${sectors.join(', ')}`);
 
   try {
     const shipmentsCollectionRef = collection(db, 'Envoi');
-    // Firestore 'in' query requires a non-empty array.
-    if (sectors.length === 0) return [];
+    let q; // Declare query variable
 
-    const q = query(
-      shipmentsCollectionRef,
-      where('secteur', 'in', sectors),
-      // Note: Ordering by a field and then limiting might not give the *absolute* most recent across all sectors
-      // if timestamps aren't perfectly aligned or indexed. Fetching more and sorting client-side is safer.
-      // orderBy('dateCreation', 'desc'), // Assuming a date field exists
-      limit(count * 2) // Fetch more to increase chance of getting latest across sectors
-    );
+    // Base query constraints: limit
+    // TEMPORARILY REMOVED: orderBy('dateCreation', 'desc') to test if missing field causes issues
+    const queryConstraints = [
+        limit(count) // Limit directly in the query now
+    ];
+
+    if (fetchAllSectors) {
+      // Admin: Query without sector filter, only limit
+      q = query(shipmentsCollectionRef, ...queryConstraints);
+    } else {
+      // Non-Admin: Query with sector filter and limit
+      // Ensure sectors is not empty before using 'in' query
+      if (sectors.length > 0) {
+          q = query(
+              shipmentsCollectionRef,
+              where('secteur', 'in', sectors),
+              ...queryConstraints // Spread the common constraints (only limit now)
+          );
+      } else {
+          // This case should technically not be reached due to the fetchAllSectors logic,
+          // but as a safeguard, return empty if sectors is unexpectedly empty here.
+          console.warn("[FirestoreService] getRecentShipmentsForSectors: Non-admin called with empty sectors array unexpectedly. Returning [].");
+          return [];
+      }
+    }
+
     const querySnapshot = await getDocs(q);
-    let shipments = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Shipment));
+    // Map documents, converting Timestamp if necessary
+    const shipments = querySnapshot.docs.map((doc) => {
+        const data = doc.data();
+        // Convert Firestore Timestamp to JS Date if needed by the component
+        const dateCreation = data.dateCreation instanceof Timestamp
+            ? data.dateCreation.toDate()
+            : (data.dateCreation ? new Date(data.dateCreation) : undefined); // Handle potential string/number dates too
 
-    // Optional: Sort client-side if a reliable date field exists
-    // shipments.sort((a, b) => (b.dateCreation?.toMillis() ?? 0) - (a.dateCreation?.toMillis() ?? 0));
+        return {
+            id: doc.id,
+            ...data,
+            dateCreation: dateCreation // Overwrite with JS Date or keep undefined
+        } as Shipment;
+    });
 
-    shipments = shipments.slice(0, count); // Take the top 'count' after potential sort
-
-    console.log(`[FirestoreService] Fetched ${shipments.length} recent shipments.`);
+    // No need to sort/slice client-side anymore as query handles it.
+    console.log(`[FirestoreService] Fetched ${shipments.length} recent shipments matching criteria.`);
     return shipments;
   } catch (error) {
     console.error("Error fetching recent shipments:", error);

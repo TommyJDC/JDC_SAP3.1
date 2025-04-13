@@ -1,5 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useLocation } from '@remix-run/react';
+import leafletStylesUrl from 'leaflet/dist/leaflet.css?url'; // Import Leaflet CSS directly
+import type { LinksFunction } from '@remix-run/node'; // Import LinksFunction type
+
+// Add a links function to export the stylesheet
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: leafletStylesUrl },
+];
 
 // Dynamically import Leaflet only on the client-side
 let L: typeof import('leaflet') | null = null;
@@ -55,10 +62,11 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
         }
       });
 
-      // Optional: Invalidate size after a short delay to ensure proper rendering
-      setTimeout(() => {
-        mapInstanceRef.current?.invalidateSize();
-      }, 100);
+       // Optional: Invalidate size after a slightly longer delay
+       setTimeout(() => {
+         console.log("MapDisplay: Initial invalidateSize triggered");
+         mapInstanceRef.current?.invalidateSize();
+       }, 300); // Increased delay
     }
 
     // Cleanup function to remove map instance when component unmounts or location changes
@@ -68,8 +76,8 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
         mapInstanceRef.current = null;
       }
     };
-    // Re-run effect if Leaflet loads, position changes, or location changes
-  }, [isLeafletLoaded, position, zoom, markers, location.key]);
+    // Re-run effect only when Leaflet loading state changes
+  }, [isLeafletLoaded]); // Corrected dependency array
 
   // Update map view and markers if props change after initial render
   useEffect(() => {
@@ -90,6 +98,12 @@ export const MapDisplay: React.FC<MapDisplayProps> = ({
            marker.bindPopup(markerInfo.popupContent);
          }
        });
+
+       // Also invalidate size when props change, after view/markers are updated
+       setTimeout(() => {
+          console.log("MapDisplay: Prop change invalidateSize triggered");
+          mapInstanceRef.current?.invalidateSize();
+       }, 50); // Shorter delay here might be okay
      }
   }, [position, zoom, markers, isLeafletLoaded]);
 

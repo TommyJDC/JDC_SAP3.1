@@ -12,12 +12,14 @@ export default defineConfig({
       },
       // Explicitly tell Remix where the app directory is
       appDirectory: "app",
-    }),
-    tsconfigPaths(),
-  ],
+     }),
+     tsconfigPaths(),
+   ],
    optimizeDeps: {
-    include: ['leaflet'],
-  },
+     // Remove 'leaflet' as it's no longer used
+     // Explicitly include react-map-gl and mapbox-gl to potentially help with resolution
+     include: ['react-map-gl', 'mapbox-gl'],
+   },
    ssr: {
     // Remove 'uuid' as it's no longer an external dependency
     noExternal: ['isbot'], // Keep isbot here if it was needed before

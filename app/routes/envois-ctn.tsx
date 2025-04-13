@@ -1,6 +1,6 @@
 import type { MetaFunction } from "@remix-run/node";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { useOutletContext } from "@remix-run/react";
+import { useOutletContext, useSearchParams } from "@remix-run/react"; // Import useSearchParams
 import { getAllShipments, getUserProfileSdk, deleteShipmentSdk } from "~/services/firestore.service";
 import type { Shipment, UserProfile, AppUser } from "~/types/firestore.types";
 import { Input } from "~/components/ui/Input";
@@ -45,7 +45,20 @@ export default function EnvoisCtn() {
   const [deletingGroup, setDeletingGroup] = useState<string | null>(null);
 
   const [selectedSector, setSelectedSector] = useState<string>('');
-  const [searchTerm, setSearchTerm] = useState<string>('');
+  // Initialize searchTerm from URL parameter if present
+  const [searchParams] = useSearchParams();
+  const initialSearchTerm = searchParams.get('client') || '';
+  const [searchTerm, setSearchTerm] = useState<string>(initialSearchTerm);
+
+  useEffect(() => {
+    // Update searchTerm if the URL parameter changes after initial load
+    const clientParam = searchParams.get('client');
+    if (clientParam && clientParam !== searchTerm) {
+      setSearchTerm(clientParam);
+    }
+    // We don't necessarily want to re-trigger data fetching on param change,
+    // just update the filter state. So, searchParams is not in the dependency array below.
+  }, [searchParams, searchTerm]); // Add searchTerm to dependencies to avoid infinite loop if param exists
 
   useEffect(() => {
     const fetchData = async () => {

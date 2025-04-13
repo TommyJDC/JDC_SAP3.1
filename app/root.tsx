@@ -12,11 +12,11 @@ import {
 } from "@remix-run/react";
 import type { LinksFunction, LoaderFunctionArgs, ActionFunctionArgs } from "@remix-run/node"; // Import ActionFunctionArgs
 import { json, redirect } from "@remix-run/node"; // Import redirect
-import NProgress from 'nprogress';
+import * as NProgress from 'nprogress'; // Use namespace import
 import nProgressStyles from 'nprogress/nprogress.css?url'; // Import nprogress CSS
 import globalStylesUrl from "~/styles/global.css?url"; // Import global CSS
 import tailwindStylesUrl from "~/tailwind.css?url"; // Import Tailwind CSS
-import leafletStylesUrl from 'leaflet/dist/leaflet.css?url'; // Import Leaflet CSS
+import mapboxStylesUrl from 'mapbox-gl/dist/mapbox-gl.css?url'; // Import Mapbox GL CSS
 
 import { Header } from "~/components/Header";
 import { MobileMenu } from "~/components/MobileMenu";
@@ -33,7 +33,7 @@ export const links: LinksFunction = () => [
   { rel: "stylesheet", href: tailwindStylesUrl },
   { rel: "stylesheet", href: globalStylesUrl },
   { rel: "stylesheet", href: nProgressStyles },
-  { rel: "stylesheet", href: leafletStylesUrl }, // Add Leaflet CSS here
+  { rel: "stylesheet", href: mapboxStylesUrl }, // Add Mapbox GL CSS here
 ];
 
 // Loader remains the same (client-side auth handling)
@@ -176,11 +176,14 @@ export default function Document() {
       </head>
       <body className="h-full font-sans">
         <ToastProvider>
-           <Suspense fallback={<div>Chargement de l'application...</div>}>
-             <App>
-             </App>
-           </Suspense>
+           {/* App should wrap the actual content */}
+           <App>
+             <Suspense fallback={<div>Chargement de l'application...</div>}>
+               {/* Outlet renders the matched route component */}
+             </Suspense>
+           </App>
         </ToastProvider>
+        <div id="modal-root"></div> {/* Add portal target here */}
         <ScrollRestoration />
         <Scripts />
       </body>

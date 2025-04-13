@@ -13,6 +13,7 @@ export default {
           400: '#A0A0A0', // Gris moyen
           800: '#333333', // Gris foncé pour fond alternatif/texte
         },
+        'jdc-blue-dark': '#0a0f1f', // Très foncé, pour le fond principal
       },
       fontFamily: {
         sans: [
@@ -28,5 +29,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [], // Remove DaisyUI plugin
 } satisfies Config;

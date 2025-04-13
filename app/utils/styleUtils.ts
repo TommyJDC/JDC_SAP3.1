@@ -25,6 +25,8 @@ const ticketStatusStyles = {
   FERME: { bgColor: 'bg-gray-600', textColor: 'text-gray-100' },
   ANNULE: { bgColor: 'bg-red-600', textColor: 'text-red-100' },
   EN_ATTENTE: { bgColor: 'bg-purple-600', textColor: 'text-purple-100' },
+  DEMANDE_DE_RMA: { bgColor: 'bg-purple-700', textColor: 'text-purple-100' }, // Added style for RMA
+  A_CLOTUREE: { bgColor: 'bg-teal-600', textColor: 'text-teal-100' }, // Added style for A Cloturee
   DEFAULT: { bgColor: 'bg-jdc-gray-700', textColor: 'text-jdc-gray-200' },
 };
 
@@ -54,6 +56,10 @@ export function getTicketStatusStyle(status: string | undefined | null): { bgCol
     case 'EN_ATTENTE':
     case 'ATTENTE_CLIENT':
       return ticketStatusStyles.EN_ATTENTE;
+    case 'DEMANDE_DE_RMA': // Added case
+      return ticketStatusStyles.DEMANDE_DE_RMA;
+    case 'A_CLOTUREE': // Added case
+      return ticketStatusStyles.A_CLOTUREE;
     default:
       // Log unknown statuses for potential addition
       if (status) {

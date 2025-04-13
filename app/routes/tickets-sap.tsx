@@ -3,8 +3,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useOutletContext } from "@remix-run/react";
 import { getUserProfileSdk, listenToAllTicketsForSectorsSdk } from "~/services/firestore.service";
 import type { SapTicket, UserProfile, AppUser } from "~/types/firestore.types";
+import { Timestamp } from 'firebase/firestore'; // Import Timestamp for date handling
 import { Input } from "~/components/ui/Input";
-import { Button } from "~/components/ui/Button"; // Import Button
+import { Button } from "~/components/ui/Button";
+import TicketSAPDetails from "~/components/TicketSAPDetails"; // Import the modal component
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faTicket, faFilter, faSearch, faUserTag, faChevronDown, faChevronRight, faSpinner,
@@ -12,7 +14,8 @@ import {
   faCalendarAlt, faChevronUp // Added new icons
 } from "@fortawesome/free-solid-svg-icons";
 import { getTicketStatusStyle } from "~/utils/styleUtils";
-import { formatDate } from "~/utils/dateUtils";
+// Use the new functions from dateUtils
+import { parseFrenchDate, formatDateForDisplay } from "~/utils/dateUtils";
 
 export const meta: MetaFunction = () => {
   return [{ title: "Tickets SAP | JDC Dashboard" }];
@@ -51,6 +54,8 @@ export default function TicketsSap() {
   const [selectedSector, setSelectedSector] = useState<string>('');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [showNumberOptions, setShowNumberOptions] = useState<Record<string, boolean>>({}); // State for phone dropdown visibility
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState<SapTicket | null>(null);
 
   const unsubscribeRef = useRef<() => void>(() => {});
 
@@ -181,12 +186,45 @@ export default function TicketsSap() {
     return groupTicketsByRaisonSociale(filtered);
   }, [allTickets, selectedSector, searchTerm]);
 
+  // --- Group Sorting Logic ---
   const clientGroups = useMemo(() => {
-      // Sort the groups alphabetically by raisonSociale (the map key)
-      const sortedEntries = Array.from(filteredAndGroupedTickets.entries())
-                                .sort((a, b) => a[0].localeCompare(b[0]));
-      return sortedEntries;
+    // Find the most recent valid date within a group of tickets
+    const findMostRecentDate = (tickets: SapTicket[]): Date | null => {
+      let mostRecent: Date | null = null;
+      for (const ticket of tickets) {
+        const parsedDate = parseFrenchDate(ticket.date);
+        if (parsedDate) {
+          if (!mostRecent || parsedDate.getTime() > mostRecent.getTime()) {
+            mostRecent = parsedDate;
+          }
+        }
+      }
+      return mostRecent;
+    };
+
+    // Convert map entries to an array and calculate the most recent date for each group
+    const groupsWithDates = Array.from(filteredAndGroupedTickets.entries()).map(
+      ([raisonSociale, tickets]) => ({
+        raisonSociale,
+        tickets,
+        mostRecentDate: findMostRecentDate(tickets),
+      })
+    );
+
+    // Sort the groups based on the mostRecentDate, descending (newest first)
+    // Groups without a valid date will be placed at the end
+    groupsWithDates.sort((a, b) => {
+      if (!b.mostRecentDate) return -1; // B has no valid date, A comes first
+      if (!a.mostRecentDate) return 1;  // A has no valid date, B comes first
+      return b.mostRecentDate.getTime() - a.mostRecentDate.getTime();
+    });
+
+    // Return the sorted array of groups (without the temporary date used for sorting)
+    // We need the original [raisonSociale, tickets] structure for the mapping below
+    return groupsWithDates.map(group => [group.raisonSociale, group.tickets] as [string, SapTicket[]]);
+
   }, [filteredAndGroupedTickets]);
+  // --- End Group Sorting Logic ---
 
   // --- Call Handling Logic ---
   const handleWebexCall = useCallback((ticketId: string, phoneNumbers: string[]) => {
@@ -200,11 +238,33 @@ export default function TicketsSap() {
   }, []);
 
   const handleNumberSelection = useCallback((number: string) => {
-    window.location.href = `webexphone://call?uri=tel:${number}`;
-    // Close all dropdowns after selection (optional, but good UX)
-    // setShowNumberOptions({}); // Uncomment to close all dropdowns
-  }, []);
-  // --- End Call Handling Logic ---
+     window.location.href = `webexphone://call?uri=tel:${number}`;
+     // Close all dropdowns after selection (optional, but good UX)
+     // setShowNumberOptions({}); // Uncomment to close all dropdowns
+   }, []);
+   // --- End Call Handling Logic ---
+
+   // --- Modal Handling Logic ---
+   const handleTicketClick = (ticket: SapTicket) => {
+     console.log("Ticket clicked:", ticket);
+     setSelectedTicket(ticket);
+     setIsModalOpen(true);
+   };
+
+   const handleCloseModal = () => {
+     setIsModalOpen(false);
+     setSelectedTicket(null);
+   };
+
+   // This function is called by the modal when an update happens inside it.
+   // The real-time listener should automatically update the list,
+   // so we might just need to close the modal or do nothing extra here.
+   const handleTicketUpdated = () => {
+     console.log("Ticket update detected from modal, list should refresh via listener.");
+     // Optionally close modal after update:
+     // handleCloseModal();
+   };
+   // --- End Modal Handling Logic ---
 
 
   if (!user && !isLoading && !isListening) {
@@ -320,14 +380,33 @@ export default function TicketsSap() {
                   />
                 </summary>
                 <div className="border-t border-jdc-gray-700 bg-jdc-gray-900 p-4 space-y-3">
-                  {/* Sort tickets within the group by date descending */}
-                  {clientTickets.sort((a, b) => b.date.getTime() - a.date.getTime()).map((ticket) => {
+                  {/* Sort tickets by parsed date descending */}
+                  {clientTickets.sort((a, b) => {
+                      const dateA = parseFrenchDate(a.date);
+                      const dateB = parseFrenchDate(b.date);
+                      // Handle null dates during sort (e.g., put them at the end)
+                      if (!dateB) return -1;
+                      if (!dateA) return 1;
+                      return dateB.getTime() - dateA.getTime();
+                    }).map((ticket) => {
                     const statusStyle = getTicketStatusStyle(ticket.statut);
-                    const displayDate = formatDate(ticket.date);
+
+                    // Parse the date using the new utility function, then format it for display
+                    const parsedDate = parseFrenchDate(ticket.date);
+                    const displayDate = formatDateForDisplay(parsedDate);
+
                     const phoneNumbersArray = ticket.telephone?.split(',').map((num: string) => num.trim()).filter(num => num) || []; // Cleaned array
 
                     return (
-                      <div key={ticket.id} className="border-b border-jdc-gray-700 pb-3 last:border-b-0 text-sm">
+                      // Add onClick handler and styling to the ticket container
+                      <div
+                        key={ticket.id}
+                        className="border-b border-jdc-gray-700 pb-3 last:border-b-0 text-sm cursor-pointer hover:bg-jdc-gray-800 transition-colors duration-150 p-3 rounded"
+                        onClick={() => handleTicketClick(ticket)}
+                        role="button" // Accessibility
+                        tabIndex={0} // Accessibility
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleTicketClick(ticket); }} // Accessibility
+                      >
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2">
                            {/* Left Side: SAP #, Date, Status */}
                            <div className="flex-1 min-w-0 mb-2 md:mb-0 md:mr-4">
@@ -359,7 +438,7 @@ export default function TicketsSap() {
                               {phoneNumbersArray.length > 0 && (
                                 <>
                                   <Button
-                                    variant="outline"
+                                    variant="secondary" // Use an existing variant like 'secondary'
                                     size="sm"
                                     onClick={(e) => {
                                       e.stopPropagation(); // Prevent card click if needed
@@ -384,6 +463,7 @@ export default function TicketsSap() {
                                             <a
                                               href={`webexphone://call?uri=tel:${number}`}
                                               onClick={(e) => {
+                                                e.stopPropagation(); // Prevent card click when clicking call link
                                                 e.preventDefault(); // Prevent default link behavior
                                                 handleNumberSelection(number);
                                                 setShowNumberOptions(prevState => ({ ...prevState, [ticket.id]: false })); // Close dropdown on selection
@@ -435,6 +515,17 @@ export default function TicketsSap() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Render the Modal */}
+      {isModalOpen && selectedTicket && (
+        <TicketSAPDetails
+          ticket={selectedTicket}
+          // Ensure sectorId is passed correctly. It should be on the ticket object itself.
+          sectorId={selectedTicket.secteur}
+          onClose={handleCloseModal}
+          onTicketUpdated={handleTicketUpdated}
+        />
       )}
     </div>
   );

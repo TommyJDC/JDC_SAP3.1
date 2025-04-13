@@ -1,3 +1,5 @@
+import { Timestamp, FieldValue } from 'firebase/firestore'; // Import necessary types
+
 /**
  * Represents the structure of user profile data stored in Firestore.
  */
@@ -15,7 +17,8 @@ export interface UserProfile {
  */
 export interface SapTicket {
   id: string; // Document ID from Firestore
-  date: Date | firebase.firestore.Timestamp; // Date of the ticket (ensure consistency)
+  // Allow null for date to handle parsing failures gracefully upstream
+  date: Date | Timestamp | null; // Date of the ticket (ensure consistency)
   client: string; // Client name or identifier (used for grouping and searching - potentially legacy if raisonSociale is primary)
   raisonSociale?: string; // Official client name for grouping/sorting
   description: string; // Ticket description
@@ -30,10 +33,17 @@ export interface SapTicket {
   telephone?: string; // Optional: Phone number(s), potentially comma-separated
 
   // Add other relevant fields from your Firestore documents:
-  // codeClient?: string; // Optional: If you have a separate client code
+  codeClient?: string; // Optional: If you have a separate client code
   // priorite?: string; // Example: 'Haute', 'Moyenne', 'Basse'
   // technicien?: string; // Example: Assigned technician's name or ID
   // resolution?: string; // Example: Details of the resolution
+
+  // Fields for TicketSAPDetails component
+  descriptionProbleme?: string; // Main problem description (might overlap with 'description')
+  statutSAP?: string; // Specific status used in the details modal (might overlap with 'statut')
+  commentaires?: string[]; // Array of comments
+  summary?: string; // AI Generated Summary
+  solution?: string; // AI Generated Solution
   // ... other ticket properties
 }
 
@@ -49,7 +59,7 @@ export interface Shipment {
   codePostal: string;
   statutExpedition: 'OUI' | 'NON' | string; // Shipment status
   secteur: string; // Sector associated with the shipment
-  dateCreation?: Date | firebase.firestore.Timestamp; // Optional: Creation date
+  dateCreation?: Date | Timestamp; // Optional: Creation date
   latitude?: number; // For map display
   longitude?: number; // For map display
   articleNom?: string; // Optional: Name of the article being shipped
@@ -63,7 +73,7 @@ export interface Shipment {
  */
 export interface StatsSnapshot {
   id: string; // Document ID (e.g., date string 'YYYY-MM-DD')
-  timestamp: Date | firebase.firestore.Timestamp; // When the snapshot was taken
+  timestamp: Date | Timestamp; // When the snapshot was taken
   totalTickets: number;      // Matches Firestore field 'totalTickets'
   activeShipments: number;   // Matches Firestore field 'activeShipments' (now unused for dashboard evolution)
   activeClients: number;     // Matches Firestore field 'activeClients' (distinct client count from 'Envoi')
@@ -77,15 +87,12 @@ export interface StatsSnapshot {
 export interface GeocodeCacheEntry {
   latitude: number;
   longitude: number;
-  timestamp: firebase.firestore.FieldValue | firebase.firestore.Timestamp; // Use FieldValue for serverTimestamp on write
+  timestamp: FieldValue | Timestamp; // Use FieldValue for serverTimestamp on write
 }
 
 // Re-export AppUser from auth.service for convenience if needed elsewhere
 // Or keep imports separate where used.
 // export type { AppUser } from '~/services/auth.service';
-
-// Namespace Firebase types if needed to avoid conflicts, e.g.,
-import * as firebase from 'firebase/firestore';
 
 // Note: Ensure you have consistent Timestamp handling (either Firebase Timestamps
 // or JS Dates) throughout your application where these types are used.
@@ -107,7 +114,7 @@ export interface DashboardLoaderData {
  */
 export interface AppUser {
   uid: string;
-  email?: string | null;
-  displayName?: string | null;
+  email: string | null; // Make email strictly string or null
+  displayName: string | null; // Make displayName strictly string or null
   // Add other relevant user properties like photoURL, emailVerified, etc.
 }

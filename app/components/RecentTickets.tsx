@@ -2,7 +2,8 @@ import React from 'react';
 import type { SapTicket } from '~/types/firestore.types';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTicket, faSpinner, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
-import { formatDate } from '~/utils/dateUtils';
+// Use the new date utility functions
+import { parseFrenchDate, formatDateForDisplay } from '~/utils/dateUtils';
 import tailwindConfig from '../../tailwind.config'; // Import Tailwind config
 
 interface RecentTicketsProps {
@@ -73,9 +74,10 @@ export const RecentTickets: React.FC<RecentTicketsProps> = ({ tickets, isLoading
                 <span className="font-medium text-white block">{getClientDisplay(ticket)}</span>
                 <span className="text-jdc-gray-400 block text-xs">
                   {getSummaryDisplay(ticket.summary)} - {ticket.secteur || 'Secteur N/A'}
-                </span>
+                 </span>
                  <span className="text-jdc-gray-500 block text-xs italic">
-                  {formatDate(ticket.date)}
+                  {/* Parse and format the date using the new functions */}
+                  {formatDateForDisplay(parseFrenchDate(ticket.date))}
                 </span>
               </div>
               <div className="flex-shrink-0 text-right">
