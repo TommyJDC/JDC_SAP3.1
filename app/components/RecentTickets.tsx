@@ -4,16 +4,11 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faTicket, faSpinner, faExclamationTriangle } from '@fortawesome/free-solid-svg-icons';
 // Use the new date utility functions
 import { parseFrenchDate, formatDateForDisplay } from '~/utils/dateUtils';
-import tailwindConfig from '../../tailwind.config'; // Import Tailwind config
-
 interface RecentTicketsProps {
   tickets: SapTicket[];
   isLoading?: boolean;
   error?: string | null;
 }
-
-// Get the color value from the resolved config
-const jdcYellowColor = tailwindConfig.theme.extend.colors['jdc-yellow'];
 
 export const RecentTickets: React.FC<RecentTicketsProps> = ({ tickets, isLoading = false, error = null }) => {
 
@@ -48,7 +43,7 @@ export const RecentTickets: React.FC<RecentTicketsProps> = ({ tickets, isLoading
     <div className="bg-jdc-card p-4 rounded-lg shadow-lg">
       <h2 className="text-xl font-semibold text-white mb-3 flex items-center">
         {/* Use color prop for FontAwesomeIcon */}
-        <FontAwesomeIcon icon={faTicket} className="mr-2" color={jdcYellowColor} />
+        <FontAwesomeIcon icon={faTicket} className="mr-2 text-jdc-yellow" />
         Tickets SAP Récents
       </h2>
       {isLoading && (

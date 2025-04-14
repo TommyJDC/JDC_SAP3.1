@@ -16,38 +16,45 @@ import * as admin from 'firebase-admin';
       let credentialSource: string = "unknown"; // For logging
 
       try {
-        // Option 1: Use BASE64 credentials if on Netlify
-        if (process.env.NETLIFY && process.env.GOOGLE_CREDENTIALS_BASE64) {
-          credentialSource = "BASE64";
-          console.log("[FirebaseAdminConfig] Attempting initialization via BASE64 credentials...");
-          const decodedCreds = Buffer.from(process.env.GOOGLE_CREDENTIALS_BASE64, "base64").toString("utf-8");
-          // Parse directly into ServiceAccount type
-          serviceAccount = JSON.parse(decodedCreds) as ServiceAccount;
-          console.log("[FirebaseAdminConfig] Parsed BASE64 credentials.");
-        }
-        // Option 2: Use local file path if GOOGLE_APPLICATION_CREDENTIALS is set (for local dev)
-        else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-           credentialSource = "FILE_PATH";
-           console.log(`[FirebaseAdminConfig] Attempting initialization via GOOGLE_APPLICATION_CREDENTIALS path: ${process.env.GOOGLE_APPLICATION_CREDENTIALS}`);
-           // The 'cert' function can take the file path directly
-           serviceAccount = process.env.GOOGLE_APPLICATION_CREDENTIALS; // Assign the path string
-           console.log("[FirebaseAdminConfig] Using credentials file path.");
-        }
-        // Option 3: Use individual environment variables (less common now but possible)
-        else if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PRIVATE_KEY && process.env.FIREBASE_CLIENT_EMAIL) {
-             credentialSource = "ENV_VARS";
-             console.log("[FirebaseAdminConfig] Attempting initialization via individual ENV VARS...");
-             serviceAccount = {
-                 projectId: process.env.FIREBASE_PROJECT_ID,
-                 // Ensure private key newlines are handled correctly
-                 privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-                 clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-             };
-             console.log("[FirebaseAdminConfig] Using individual ENV VARS credentials.");
-        } else {
-             console.error("[FirebaseAdminConfig] CRITICAL: No valid Firebase Admin credentials found (checked BASE64, file path, individual vars).");
-             throw new Error("Firebase Admin credentials not configured.");
-        }
+        // Use hardcoded credentials for internal app
+        credentialSource = "HARDCODED";
+        console.log("[FirebaseAdminConfig] Using hardcoded credentials...");
+        // Use complete service account from provided JSON
+        serviceAccount = {
+          projectId: "sap-jdc",
+          privateKey: `
+-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDk2DRRR1WNcCNr
+BTkyGJqgjH+lzIZ6z5eYTv6Cna4ZS2JJ3qGDhKIowhnLroM7jzIqKC5R+ewmXfwo
++9iomnGf66OT9orjuXrOB/UpWTVXFC8E3rDvA24zXF3OKxete1dNtoo9NQA/8Rb0
+Rp/MoAPv9tAz9GqATdHP2qJy61g+DMe4XmOHJPiDPlxqvYztwzmagpkvUYRKb2up
+RlOe4nrP1rse8aVvTb+JAAtbuVO3A8aV4EWJf4MoNjlgXw5AtiiGNRMCeu/tWDy3
+bVAsjGL8Nwct5I21AA39Wsdgo0vt+DlkB6B9cmetm8v48Z/OelQVN8QEY2OgLsRX
+QjIKkcNJAgMBAAECggEABqALw7P2UhtGVeQs0mUhSjdHFXG6YvZ87mKQaQ+k6Vk5
+WzzKyEKgFItUsS+NimfhjT7kjb2tNzR5XGZje14dSVf1Fbo0LdZCK+d8aC9g+p28
+Tr5zuOJh37LI3x3NmFl9yY4t/7T3xjd18VR/boPOGWBiiV6GHCN584k3iBmFeyZY
+OG0aHdZO6IWk9aQjz344BZM14yJBnaUC21kCepZItpjrVUERi6puvzaD228CgGW3
+wQXhVv7duGAtydQu0ZFmMzBNy2ux9tReQte/2Eo88ua/5KvBz+k0rRGvuhQX+Smr
+Dy1Ld6wS8/weNd4N8y3CjpDjCwcHCFAzafNH6uiHUQKBgQD1cTvOLx7dNIhfJLx0
+BDoIYSHSVBHIa4IosFm/O8IERREt1CPI0zGAyf5XtZdmuHUEjmkcdxjW1qyt0BjJ
+8InohyunF2VfwyLq8+zTs3OXCuzMj0tMUhSN1ZJn6DRQT0brsVb9zWIyWSeDcXON
+dLjUPpiyjbcXO16+bZwNVWI7OwKBgQDusDL4nN5tgBv5O2vxYifuVBtoRY0rmmO/
+xpHXuY56M3qh3hbiRIBN/uGf9OcESBuZuKDCOtnkuuIf5DPUW6g7x3gbuCall6Ix
+TtWTrM6wn6fCtA3bP0CDzmmjJSnNwV89CHSNJiQAympFviWVsToouNUucHT4d/xQ
+0kILxA6rSwKBgQCItgGx3t06KUCsfjHaDWClujS0is8862UcdN4Ifqia6D2hYUBt
+Y/V23wwknqkuNiA34Xr6t/vF7t1QE1E7ahfmxSOzdnyo0nBonmWTpakEwLkVV9uB
+L1bzibp61gQNl5rRPX5O8E95697ugAr1B8bLsfIrwnPxJMipGTSK2LxWcQKBgGD5
+ERxUj0GppLPTYn2FRXfcj+4DI+GtLg2CHUqpxqr7Mz2EP4PaFM6bWQtlsl3Y9e20
+RwviYRg+nRQb4LrMKkNvPOr2HC12t5yUzMzcjnTPyJagFGkY/5sNR3nS5XMEty7S
+upeGAWaY1ihTom14vYpB3cqqQbuY89faNJ8XHmaVAoGAWcQlBIJUap1S+I5OVD2I
+xilxcxjptuj7E9B3BL4Fc/IfrCGVfcTJlqbLJRPw2UmeY3lp+umz0fjO9BX3NGXD
+MBcJGdBErDsluxSmGvJOojFiMnSQJdRapAWIimUfmDZtzzgdFppkC6uzT0Dd+/6Q
+NDAjd3cfjZIEAmSyeVMAYbA=
+-----END PRIVATE KEY-----
+`.trim().replace(/\\n/g, '\n'),
+          clientEmail: "remix-server-firestore@sap-jdc.iam.gserviceaccount.com"
+        };
+        console.log("[FirebaseAdminConfig] Using hardcoded credentials.");
 
         // Ensure serviceAccount is defined before calling cert
         if (!serviceAccount) {
