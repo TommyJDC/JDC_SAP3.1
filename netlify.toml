@@ -9,5 +9,5 @@
 
     [[redirects]]
       from = "/*"
-      to = "/build/server"
+      to = ".netlify/functions-internal"
       status = 200
