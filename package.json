@@ -17,6 +17,7 @@
     "@google/generative-ai": "^0.24.0",
     "@headlessui/react": "^2.2.1",
     "@heroicons/react": "^2.1.4",
+    "@remix-run/netlify": "^1.19.3",
     "@remix-run/node": "^2.9.2",
     "@remix-run/react": "^2.9.2",
     "firebase": "^10.12.3",
